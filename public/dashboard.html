@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clínica-Escola</title>
+
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+
+    <!-- FullCalendar -->
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.11/locales/pt-br.global.min.js"></script>
+
+    <!-- Moment.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+
+    <!-- Fontes -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Notificações -->
+    <div id="notification-container" class="hidden">
+        <p id="notification-message"></p>
+    </div>
+
+    <!-- Cabeçalho -->
+    <header>
+        <h1>Clínica Escola - Fatec</h1>
+        <div class="user-info">
+            <button id="logout-button">Sair</button>
+        </div>
+    </header>
+
+    <!-- Navegação -->
+    <nav>
+        <button class="nav-button active" data-module="agendamentos">Agendamentos 📅</button>
+        <button class="nav-button" data-module="documentacao">Controle de Documentação 📝</button>
+        <button class="nav-button" data-module="inventario">Inventário de Testes 📦</button>
+    </nav>
+
+    <!-- Conteúdo Principal -->
+    <main class="content-container">
+
+        <!-- =================== AGENDAMENTOS =================== -->
+        <section id="agendamentos" class="module">
+            <h2>📅 Agendamentos por Sala</h2>
+
+            <div class="header-actions">
+                <button id="register-appointment-btn" class="action-button">Registrar Atendimento</button>
+                <button id="back-to-cards-btn" class="action-button hidden">Voltar às salas</button>
+            </div>
+
+            <div id="rooms-card-container" class="room-cards-grid"></div>
+
+            <div id="today-summary-container" class="spacer-top"></div>
+
+            <div id="advanced-search-container" class="spacer-top">
+                <h3 class="section-title">🔍 Pesquisa Avançada de Agenda</h3>
+
+                <div class="search-flex-group">
+                    <div class="search-input-group">
+                        <label for="search-type-select">Tipo de Pesquisa:</label>
+                        <select id="search-type-select">
+                            <option value="today">Agenda de Hoje (Resumo)</option>
+                            <option value="room">Por Sala (Mês)</option>
+                            <option value="student">Por Estagiário (Todos)</option>
+                            <option value="date">Por Data Específica</option>
+                        </select>
+                    </div>
+
+                    <div class="search-input-group" id="search-input-group-field"></div>
+
+                    <button id="search-agenda-btn" class="action-button big-btn">Buscar</button>
+                </div>
+
+                <div id="search-results-table" class="spacer-top">
+                    <p>Selecione um tipo de pesquisa e clique em "Buscar".</p>
+                </div>
+            </div>
+
+            <div id="room-calendar-view" class="hidden">
+                <h3 id="current-room-title"></h3>
+                <div id="calendar"></div>
+            </div>
+        </section>
+
+        <!-- =================== DOCUMENTAÇÃO =================== -->
+        <section id="documentacao" class="module hidden">
+            <h2>📝 Controle de Documentação (Relatórios e Prazos)</h2>
+
+            <div class="header-actions">
+                <button id="generate-general-report" class="action-button btn-primary big-btn">
+                    Gerar Relatório Geral (CSV)
+                </button>
+
+                <div class="search-input-group fixed-width">
+                    <label for="documentation-search-input">Buscar por Estagiário:</label>
+                    <input type="text" id="documentation-search-input" placeholder="Digite o nome do estagiário">
+                </div>
+            </div>
+
+            <div id="documentation-list"></div>
+        </section>
+
+        <!-- =================== INVENTÁRIO =================== -->
+        <section id="inventario" class="module hidden">
+            <h2>📦 Inventário de Testes e Materiais</h2>
+
+            <div class="header-actions">
+                <button id="add-test-button" class="action-button btn-success">+ Adicionar Novo Teste</button>
+            </div>
+
+            <div id="inventory-list"></div>
+        </section>
+
+        <!-- =================== MODAL: AGENDAR ATENDIMENTO =================== -->
+        <div id="appointment-modal" class="modal hidden" role="dialog" aria-modal="true">
+            <div class="modal-content">
+                <h3 id="modal-date-display">Agendar Novo Atendimento</h3>
+
+                <form id="appointment-form">
+                    <input type="hidden" id="modal-appointment-doc-id">
+
+                    <label for="modal-estagiario">Nome do Estagiário:</label>
+                    <input type="text" id="modal-estagiario" required>
+
+                    <label for="modal-iniciais">Iniciais do Paciente</label>
+                    <input id="modal-iniciais" type="text" placeholder="Ex: M.S.">
+
+                    <label for="modal-date">Data:</label>
+                    <input type="date" id="modal-date" required>
+
+                    <label for="modal-time">Hora:</label>
+                    <input type="time" id="modal-time" value="13:00" required>
+
+                    <label for="modal-sala">Sala:</label>
+                    <select id="modal-sala" required></select>
+
+                    <label for="modal-appointment-type">Tipo de Atendimento:</label>
+                    <select id="modal-appointment-type" required>
+                        <option value="Único">Agendamento Único</option>
+                        <option value="Fixo">Fixo (Repetir por 3 Meses)</option>
+                    </select>
+
+                    <label for="modal-teste">Teste/Material Utilizado:</label>
+                    <select id="modal-teste"></select>
+
+                    <p id="modal-error-message" class="error"></p>
+
+                    <div class="modal-actions">
+                        <button type="button" id="modal-cancel-button">Cancelar</button>
+                        <button type="button" id="modal-save-button" class="primary-action-button">Salvar
+                            Agendamento</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- =================== MODAL: NOVO TESTE =================== -->
+        <div id="new-test-modal" class="modal hidden" role="dialog" aria-modal="true">
+            <div class="modal-content">
+                <h3>Adicionar Novo Teste ao Inventário</h3>
+
+                <form>
+
+                    <label for="new-test-name">Nome do Teste:</label>
+                    <input type="text" id="new-test-name" required>
+
+                    <label for="new-test-type">Tipo de Teste:</label>
+                    <select id="new-test-type">
+                        <option value="simples">Folha Única</option>
+                        <option value="multiplo">Múltiplos Componentes</option>
+                    </select>
+
+                    <div id="simple-test-fields">
+                        <label for="new-test-stock">Quantidade Inicial:</label>
+                        <input type="number" id="new-test-stock" value="1" min="0">
+
+                        <label for="new-test-alert">Alerta de Estoque Mínimo:</label>
+                        <input type="number" id="new-test-alert" value="5" min="0">
+                    </div>
+
+                    <div id="multi-test-fields" class="hidden">
+
+                        <h4>Componentes do Teste:</h4>
+                        <div id="components-container"></div>
+
+                        <button type="button" id="add-component-btn" class="btn-secondary">
+                            + Adicionar Componente
+                        </button>
+
+                    </div>
+
+                    <p id="new-test-error" class="error"></p>
+
+                    <div class="modal-actions">
+                        <button type="button" id="new-test-cancel-button">Cancelar</button>
+                        <button type="button" id="new-test-save-button" class="primary-action-button">Salvar
+                            Teste</button>
+                    </div>
+
+                </form>
+            </div>
+        </div>
+
+        <!-- =================== MODAL: GERENCIAR COMPONENTES =================== -->
+        <div id="components-modal" class="modal hidden" role="dialog" aria-modal="true">
+            <div class="modal-content">
+                <h3 id="components-modal-title">Gerenciar Componentes</h3>
+
+                <div id="components-list"></div>
+                <p id="components-error" class="error"></p>
+
+                <div class="modal-actions">
+                    <button type="button" id="components-close-button">Fechar</button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- =================== MODAL GLOBAL DE CONFIRMAÇÃO =================== -->
+    <div id="custom-confirm-modal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-content">
+            <h3 id="confirm-title">Confirmação Necessária</h3>
+            <p id="confirm-message"></p>
+
+            <div class="modal-actions">
+                <button type="button" id="confirm-cancel-button">Cancelar</button>
+                <button type="button" id="confirm-ok-button" class="primary-action-button btn-danger">Confirmar</button>
+            </div>
+        </div>
+    </div>
+    <!-- Modal de uso de componentes -->
+    <div id="use-components-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <h3>Folhas utilizadas no atendimento</h3>
+
+            <div id="use-components-list" class="components-use-list">
+                <!-- linhas geradas dinamicamente -->
+            </div>
+
+            <div class="modal-actions">
+                <button id="cancel-use-components" class="btn-gray">Cancelar</button>
+                <button id="confirm-use-components" class="btn-green">
+                    Confirmar Presença
+                </button>
+            </div>
+        </div>
+        <!-- Modal de Alerta de Estoque Baixo -->
+        <div id="low-stock-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3 style="color: #ef4444; border-bottom-color: #fecaca;">⚠ Atenção: Estoque Baixo</h3>
+                <p>Os seguintes itens atingiram o limite mínimo de segurança:</p>
+
+                <ul id="low-stock-list" style="margin: 1rem 0; padding-left: 1.5rem; color: #334155;">
+                    <!-- Itens serão inseridos aqui via JS -->
+                </ul>
+
+                <div class="modal-actions">
+                    <button id="close-stock-alert" class="primary-action-button">Entendi</button>
+                </div>
+            </div>
+        </div>
+
+        <script type="module" src="./js/app.js"></script>
+
+</body>
+
+</html>

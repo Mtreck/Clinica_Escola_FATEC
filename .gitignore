@@ -1,0 +1,24 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Firebase / environment
+.env
+.env.*
+public/js/firebase.js
+firebase-config.js
+config/firebase-config.js
+.firebase/
+.firebaserc
+
+# Cache Firebase Hosting
+.firebase/
+hosting.*.cache
+
+# Node (se usar futuramente)
+node_modules/
