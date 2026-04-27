@@ -43,6 +43,7 @@
 
     <!-- Navegação -->
     <nav>
+        <button class="nav-button" data-module="recados">Avisos e Recados 📢</button>
         <button class="nav-button active" data-module="agendamentos">Agendamentos 📅</button>
         <button class="nav-button" data-module="documentacao">Controle de Documentação 📝</button>
         <button class="nav-button" data-module="inventario">Inventário de Testes 📦</button>
@@ -50,6 +51,17 @@
 
     <!-- Conteúdo Principal -->
     <main class="content-container">
+
+        <!-- =================== RECADOS =================== -->
+        <section id="recados" class="module hidden">
+            <h2>📢 Gerenciamento de Avisos e Recados</h2>
+
+            <div class="header-actions">
+                <button id="add-recado-btn" class="action-button btn-success">+ Criar Novo Recado</button>
+            </div>
+
+            <div id="admin-recados-list" class="spacer-top"></div>
+        </section>
 
         <!-- =================== AGENDAMENTOS =================== -->
         <section id="agendamentos" class="module">
@@ -103,10 +115,23 @@
                     Gerar Relatório Geral (CSV)
                 </button>
 
+                <div class="search-input-group fixed-width" style="margin-right: 15px;">
+                    <label for="documentation-month-filter">Filtrar por Mês:</label>
+                    <select id="documentation-month-filter" style="width: 100%; border: 1px solid #cbd5e1; border-radius: 4px; padding: 0.5rem; font-family: inherit; margin-top: 5px;">
+                        <option value="all">Todos os Meses</option>
+                    </select>
+                </div>
+
                 <div class="search-input-group fixed-width">
                     <label for="documentation-search-input">Buscar por Estagiário:</label>
-                    <input type="text" id="documentation-search-input" placeholder="Digite o nome do estagiário">
+                    <input type="text" id="documentation-search-input" placeholder="Digite o nome do estagiário" style="margin-top: 5px;">
                 </div>
+            </div>
+
+            <div class="tabs-container" style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">
+                <button class="doc-tab-btn active" data-filter="pendente_presenca" style="background: none; border: none; font-size: 16px; font-weight: 600; color: #4F76C9; cursor: pointer; padding: 5px 10px; border-bottom: 3px solid #4F76C9; outline: none;">Sem Presença</button>
+                <button class="doc-tab-btn" data-filter="doc_pendente" style="background: none; border: none; font-size: 16px; font-weight: 500; color: #64748b; cursor: pointer; padding: 5px 10px; outline: none;">Doc. Pendente</button>
+                <button class="doc-tab-btn" data-filter="concluido" style="background: none; border: none; font-size: 16px; font-weight: 500; color: #64748b; cursor: pointer; padding: 5px 10px; outline: none;">Concluídos</button>
             </div>
 
             <div id="documentation-list"></div>
@@ -122,6 +147,51 @@
 
             <div id="inventory-list"></div>
         </section>
+
+        <!-- =================== MODAL: RECADOS =================== -->
+        <div id="recado-modal" class="modal hidden" role="dialog" aria-modal="true">
+            <div class="modal-content">
+                <h3 id="modal-recado-title">Novo Recado</h3>
+
+                <form id="recado-form" style="display: flex; flex-direction: column; gap: 12px;">
+                    <input type="hidden" id="modal-recado-id">
+                    <input type="hidden" id="modal-recado-cor-hidden" value="#3b82f6">
+
+                    <div>
+                        <label for="modal-recado-titulo" style="font-weight: 600; margin-bottom: 4px; display: block;">Título do Aviso:</label>
+                        <input type="text" id="modal-recado-titulo" placeholder="Ex: Feriado, Aviso Geral..." required style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit;">
+                    </div>
+
+                    <div>
+                        <label for="modal-recado-mensagem" style="font-weight: 600; margin-bottom: 4px; display: block;">Mensagem Detalhada:</label>
+                        <textarea id="modal-recado-mensagem" rows="4" placeholder="Escreva o recado aqui..." required style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit; resize: vertical;"></textarea>
+                    </div>
+
+                    <div>
+                        <label for="modal-recado-data" style="font-weight: 600; margin-bottom: 4px; display: block;">Data de Expiração (Quando o recado some):</label>
+                        <input type="date" id="modal-recado-data" required style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit;">
+                    </div>
+                    
+                    <div>
+                        <label style="font-weight: 600; margin-bottom: 8px; display: block;">Cor de Destaque:</label>
+                        <div id="color-picker-group" style="display: flex; gap: 12px;">
+                            <button type="button" class="color-btn" data-color="#3b82f6" style="background: #3b82f6; width: 36px; height: 36px; border-radius: 50%; border: 3px solid #1e293b; cursor: pointer; padding: 0; outline: none;"></button>
+                            <button type="button" class="color-btn" data-color="#ef4444" style="background: #ef4444; width: 36px; height: 36px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; padding: 0; outline: none;"></button>
+                            <button type="button" class="color-btn" data-color="#10b981" style="background: #10b981; width: 36px; height: 36px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; padding: 0; outline: none;"></button>
+                            <button type="button" class="color-btn" data-color="#f59e0b" style="background: #f59e0b; width: 36px; height: 36px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; padding: 0; outline: none;"></button>
+                            <button type="button" class="color-btn" data-color="#8b5cf6" style="background: #8b5cf6; width: 36px; height: 36px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; padding: 0; outline: none;"></button>
+                        </div>
+                    </div>
+
+                    <p id="modal-recado-error" class="error" style="margin: 0;"></p>
+
+                    <div class="modal-actions" style="margin-top: 10px;">
+                        <button type="button" id="modal-recado-cancel-btn">Cancelar</button>
+                        <button type="button" id="modal-recado-save-btn" class="primary-action-button">Salvar Recado</button>
+                    </div>
+                </form>
+            </div>
+        </div>
 
         <!-- =================== MODAL: AGENDAR ATENDIMENTO =================== -->
         <div id="appointment-modal" class="modal hidden" role="dialog" aria-modal="true">

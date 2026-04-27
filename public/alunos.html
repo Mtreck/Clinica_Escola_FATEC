@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Área do Aluno - Clínica</title>
+
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+
+    <!-- FullCalendar -->
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.11/locales/pt-br.global.min.js"></script>
+
+    <!-- Fontes -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+
+    <style>
+        /* Estilização Premium da Tabela de Horários (FullCalendar) */
+        
+        /* Arredonda o contorno e suaviza as bordas internas */
+        .fc-theme-standard td, .fc-theme-standard th {
+            border-color: #f1f5f9;
+        }
+        
+        /* Estiliza o cabeçalho dos dias da semana (ex: SEG 27/04) */
+        .fc-col-header-cell {
+            background-color: #f8fafc;
+            padding: 12px 0 !important;
+            border-bottom: 2px solid #e2e8f0 !important;
+        }
+        .fc-col-header-cell-cushion {
+            color: #3b82f6; /* Azul primário */
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 0.05em;
+            text-decoration: none !important;
+        }
+
+        /* Fundo das células de dias na grade */
+        .fc-daygrid-day {
+            background-color: #fafafa;
+            transition: background-color 0.2s;
+        }
+        .fc-daygrid-day:hover {
+            background-color: #f1f5f9;
+        }
+
+        /* Remove sublinhado indesejado nos links gerados pelo calendário */
+        .fc a {
+            text-decoration: none !important;
+        }
+
+        /* Espaçamento interno dos blocos de evento */
+        .fc-daygrid-event-harness {
+            margin: 4px !important;
+        }
+
+        /* Animação de entrada dos blocos de horário */
+        @keyframes popIn {
+            0% {
+                opacity: 0;
+                transform: translateY(15px) scale(0.9);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .event-animated {
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            opacity: 0; /* Inicia invisível para a animação */
+        }
+
+        /* Marca d'água de FERIADO no meio da coluna */
+        .holiday-watermark {
+            animation: pulseHoliday 3s ease-in-out infinite;
+            color: #ef4444;
+            font-size: 1.15rem;
+            font-weight: 900;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            user-select: none;
+            pointer-events: none;
+        }
+
+        @keyframes pulseHoliday {
+            0% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.05); }
+            100% { opacity: 0.3; transform: scale(1); }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>
+            Clínica Escola - Fatec
+        </h1>
+    </header>
+
+    <!-- Navegação Principal -->
+    <nav id="main-nav">
+        <button class="nav-button active" data-target="modulo-recados">📢 Recados</button>
+        <button class="nav-button" data-target="modulo-agenda">📅 Agenda da Clínica</button>
+    </nav>
+
+    <main class="content-container">
+
+        <!-- Módulo: Recados -->
+        <section id="modulo-recados" class="module" style="display: block;">
+            <h2>📢 Quadro de Recados</h2>
+            <p style="color: #64748b; margin-bottom: 1.5rem;">Acompanhe abaixo os comunicados e avisos importantes deixados pela administração.</p>
+            
+            <div id="recados-list" style="display: flex; flex-direction: column; gap: 1rem;">
+                <!-- Recados carregados pelo Firebase -->
+                <div style="text-align: center; color: #94a3b8; padding: 2rem;">Carregando recados...</div>
+            </div>
+        </section>
+
+        <!-- Módulo: Agenda -->
+        <section id="modulo-agenda" class="module hidden">
+            <h2>📅 Agenda da Clínica</h2>
+            <p style="color: #64748b; margin-bottom: 1.5rem;">Acompanhe abaixo os agendamentos realizados. Visualize as datas, horários e salas dos atendimentos.</p>
+
+            <!-- Grade de Cartões das Salas -->
+            <div id="rooms-card-container" class="room-cards-grid" style="margin-top: 1.5rem;"></div>
+
+            <!-- Calendário Oculto no Início -->
+            <div id="calendar-view" class="hidden" style="margin-top: 1rem;">
+                <h3 id="current-room-title" style="margin-bottom: 1rem; color: #334155;"></h3>
+                <div id="calendar" style="background: white; padding: 1rem; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"></div>
+            </div>
+        </section>
+
+    </main>
+
+    <script type="module" src="./js/alunos.js"></script>
+
+</body>
+
+</html>

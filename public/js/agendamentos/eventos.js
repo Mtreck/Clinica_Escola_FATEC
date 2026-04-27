@@ -10,8 +10,8 @@ export async function loadTestOptions() {
     if (!select) return;
     select.innerHTML = '';
     const defaultOption = document.createElement('option');
-    defaultOption.value = 'NÃO USOU';
-    defaultOption.textContent = 'NÃO USOU';
+    defaultOption.value = '';
+    defaultOption.textContent = '';
     select.appendChild(defaultOption);
     try {
         const snap = await db.collection('estoque_testes').orderBy('nome_teste').get();
@@ -45,7 +45,8 @@ export async function loadTodayAppointments() {
         let html = '<ul id="today-appointments-list">';
         results.forEach(r => {
             const { date:dt, time:tm } = formatDateTime(r.data_hora);
-            html += `<li><span style="font-weight:bold;min-width:50px;">${tm}</span> <span class="appointment-info">${r.estagiario_nome} (${r.teste_usado})</span> <span style="font-weight:bold;color:#4F76C9;min-width:60px;text-align:right;">${r.sala}</span></li>`;
+            const testeInfo = (r.teste_usado && r.teste_usado !== 'NÃO USOU') ? ` (${r.teste_usado})` : '';
+            html += `<li><span style="font-weight:bold;min-width:50px;">${tm}</span> <span class="appointment-info">${r.estagiario_nome}${testeInfo}</span> <span style="font-weight:bold;color:#4F76C9;min-width:60px;text-align:right;">${r.sala}</span></li>`;
         });
         html += '</ul>';
         listContainer.innerHTML = html;
@@ -74,9 +75,60 @@ export async function saveNewAppointment() {
         return;
     }
 
+    // ==========================================
+    // VERIFICAÇÃO DE CONFLITO DE AGENDA / SALA
+    // ==========================================
+    try {
+        let datasParaVerificar = [dataString];
+
+        if (appointmentType === "Fixo" && !isEditing) {
+            const base = new Date(`${dataString}T${hora}`);
+            const end = new Date(base);
+            end.setMonth(end.getMonth() + 3);
+
+            let next = new Date(base);
+            next.setDate(next.getDate() + 7);
+
+            while (next <= end) {
+                datasParaVerificar.push(next.toISOString().slice(0, 10));
+                next.setDate(next.getDate() + 7);
+            }
+        }
+
+        let conflictDates = [];
+
+        // Verifica cada data agendada para evitar choque de sala no mesmo horário
+        for (const dateToCheck of datasParaVerificar) {
+            const snap = await db.collection("agendamentos")
+                .where("data", "==", dateToCheck)
+                .get();
+
+            snap.forEach(doc => {
+                if (isEditing && doc.id === docId) return;
+                
+                const d = doc.data();
+                if (d.sala === sala && d.hora === hora) {
+                    conflictDates.push(dateToCheck);
+                }
+            });
+        }
+
+        if (conflictDates.length > 0) {
+            const datasFormatadas = conflictDates.map(d => d.split('-').reverse().join('/'));
+            errorMessage.textContent = `A Sala ${sala} já está ocupada às ${hora} na(s) data(s): ${datasFormatadas.join(' e ')}.`;
+            return;
+        }
+
+    } catch (err) {
+        console.error("Erro ao verificar conflito de agenda:", err);
+        errorMessage.textContent = "Erro ao checar disponibilidade. Tente novamente.";
+        return;
+    }
+    // ==========================================
+
     // Buscar ID do teste
     let testeId = null;
-    if (testeNome !== "NÃO USOU") {
+    if (testeNome && testeNome !== "" && testeNome !== "NÃO USOU") {
         const snap = await db.collection("estoque_testes")
             .where("nome_teste", "==", testeNome)
             .limit(1)
@@ -178,7 +230,7 @@ export async function editAppointment(docId) {
         document.getElementById('modal-iniciais').value = data.iniciais_paciente || '';
         document.getElementById('modal-appointment-doc-id').value = docId;
         document.getElementById('modal-estagiario').value = data.estagiario_nome || '';
-        document.getElementById('modal-teste').value = data.teste_usado || 'NÃO USOU';
+        document.getElementById('modal-teste').value = (data.teste_usado === 'NÃO USOU') ? '' : (data.teste_usado || '');
         document.getElementById('modal-sala').value = data.sala || '';
         document.getElementById('modal-date').value = data.data || '';
         document.getElementById('modal-time').value = data.hora || '';

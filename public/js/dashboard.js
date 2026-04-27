@@ -8,6 +8,7 @@ import { setupRoomCards, showRoomCards } from "./agendamentos/calendario.js";
 import { loadInventoryList, checkLowStockAlerts, showAddTestModal, saveNewTest } from "./inventario.js";
 import { loadDocumentationList, initDocumentation } from "./documentacao.js";
 import { setupAdvancedSearch } from "./agendamentos/Busca_avancada.js";
+import { initRecados, loadRecadosList } from "./recados.js";
 
 // -------- FUNÇÃO PRINCIPAL --------
 export async function initializeDashboard() {
@@ -39,6 +40,7 @@ export async function initializeDashboard() {
     setupRoomCards();
     setupAdvancedSearch();
     initDocumentation();
+    initRecados();
 
     // Carrega opções de testes
     loadTestOptions();
@@ -130,6 +132,8 @@ function setupNavigation() {
                 loadDocumentationList("");
             } else if (targetModuleId === "inventario") {
                 loadInventoryList();
+            } else if (targetModuleId === "recados") {
+                loadRecadosList();
             }
         });
     });

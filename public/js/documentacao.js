@@ -23,6 +23,71 @@ export async function loadDocumentationList(searchQuery = "") {
         let filtered = snapshot.docs;
 
         // ======================================================
+        // FILTRAGEM POR ABA
+        // ======================================================
+        const activeTabBtn = document.querySelector(".doc-tab-btn.active");
+        const activeFilter = activeTabBtn ? activeTabBtn.getAttribute("data-filter") : "pendente_presenca";
+
+        filtered = filtered.filter(doc => {
+            const data = doc.data();
+            if (activeFilter === "pendente_presenca") {
+                return !data.presenca_aluno;
+            } else if (activeFilter === "doc_pendente") {
+                return data.presenca_aluno && !data.doc_entregue;
+            } else if (activeFilter === "concluido") {
+                return data.presenca_aluno && data.doc_entregue;
+            }
+            return true;
+        });
+
+        // ======================================================
+        // FILTRAGEM POR MÊS
+        // ======================================================
+        const monthSelect = document.getElementById("documentation-month-filter");
+        
+        if (monthSelect) {
+            // Extrair meses únicos dentro dos itens que passaram pelo filtro de Aba
+            const availableMonths = new Set();
+            filtered.forEach(doc => {
+                const dt = doc.data().data_hora?.toDate();
+                if (dt) availableMonths.add(`${(dt.getMonth() + 1).toString().padStart(2, '0')}/${dt.getFullYear()}`);
+            });
+            const sortedMonths = Array.from(availableMonths).sort((a, b) => {
+                const [mA, yA] = a.split('/');
+                const [mB, yB] = b.split('/');
+                return new Date(yB, mB - 1) - new Date(yA, mA - 1); // mais recente primeiro
+            });
+
+            // Guardar mês que estava selecionado
+            let currentSelectedMonth = monthSelect.value;
+
+            if (!monthSelect.hasAttribute("data-user-changed")) {
+                const now = new Date();
+                currentSelectedMonth = `${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
+            }
+            
+            // Recriar lista de opções
+            monthSelect.innerHTML = '<option value="all">Todos os Meses</option>';
+            sortedMonths.forEach(m => {
+                const opt = document.createElement("option");
+                opt.value = m;
+                opt.textContent = m;
+                if (m === currentSelectedMonth) opt.selected = true;
+                monthSelect.appendChild(opt);
+            });
+
+            // Aplicar o filtro na variavel filtered, usando o mês que acabou ficando selecionado
+            if (monthSelect.value !== "all") {
+                filtered = filtered.filter(doc => {
+                    const dt = doc.data().data_hora?.toDate();
+                    if (!dt) return false;
+                    const mesAno = `${(dt.getMonth() + 1).toString().padStart(2, '0')}/${dt.getFullYear()}`;
+                    return mesAno === monthSelect.value;
+                });
+            }
+        }
+
+        // ======================================================
         // 🔍 BUSCA INTELIGENTE: NOME OU DATA NO MESMO INPUT
         // ======================================================
         if (searchQuery) {
@@ -316,11 +381,42 @@ export function initDocumentation() {
             loadDocumentationList(termo);
         });
     }
+
+    // ===== FILTRO POR MÊS =====
+    const monthFilter = document.getElementById("documentation-month-filter");
+    if (monthFilter) {
+        monthFilter.addEventListener("change", () => {
+            monthFilter.setAttribute("data-user-changed", "true");
+            const termo = searchInput ? searchInput.value.trim() : "";
+            loadDocumentationList(termo);
+        });
+    }
+
     // ===== GERAR CSV =====
     const csvButton = document.getElementById("generate-general-report");
     if (csvButton) {
         csvButton.addEventListener("click", generateDocumentationCSV);
     }
+
+    // ===== ABAS =====
+    const tabBtns = document.querySelectorAll(".doc-tab-btn");
+    tabBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+            tabBtns.forEach(b => {
+                b.classList.remove("active");
+                b.style.color = "#64748b";
+                b.style.borderBottom = "none";
+                b.style.fontWeight = "500";
+            });
+            btn.classList.add("active");
+            btn.style.color = "#4F76C9";
+            btn.style.borderBottom = "3px solid #4F76C9";
+            btn.style.fontWeight = "600";
+            
+            const searchInput = document.getElementById("documentation-search-input");
+            loadDocumentationList(searchInput ? searchInput.value.trim() : "");
+        });
+    });
 
     _delegationInitialized = true;
 }
