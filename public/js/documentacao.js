@@ -5,22 +5,36 @@ import { showNotification } from "./utils/notificacao.js";
 
 let _delegationInitialized = false;
 
+// Variáveis de Cache e Paginação
+let cachedSnapshot = null;
+let lastFetchTime = 0;
+let currentPage = 1;
+const itemsPerPage = 50;
+
 // ======================================================
 //                  CARREGAR LISTA
 // ======================================================
-export async function loadDocumentationList(searchQuery = "") {
+export async function loadDocumentationList(searchQuery = "", forceRefresh = false) {
     const listContainer = document.getElementById("documentation-list");
     if (!listContainer) return;
 
-    listContainer.innerHTML = "Carregando lista...";
+    if (!cachedSnapshot || forceRefresh) {
+        listContainer.innerHTML = "<p style='text-align:center; padding: 2rem; color: #64748b;'>Carregando dados do banco...</p>";
+    }
 
     try {
-        const snapshot = await db
-            .collection("agendamentos")
-            .orderBy("data_hora", "desc")
-            .get();
+        const now = Date.now();
+        // Busca no banco APENAS se não tiver cache, se for forçado, ou se passou 5 minutos
+        if (forceRefresh || !cachedSnapshot || (now - lastFetchTime > 300000)) {
+            cachedSnapshot = await db
+                .collection("agendamentos")
+                .orderBy("data_hora", "desc")
+                .limit(500) // Traz os 500 mais recentes de uma vez e guarda na memória
+                .get();
+            lastFetchTime = now;
+        }
 
-        let filtered = snapshot.docs;
+        let filtered = cachedSnapshot.docs;
 
         // ======================================================
         // FILTRAGEM POR ABA
@@ -124,12 +138,27 @@ export async function loadDocumentationList(searchQuery = "") {
         // ======================================================
 
         if (filtered.length === 0) {
-            listContainer.innerHTML = `<p>Nenhum resultado encontrado.</p>`;
+            listContainer.innerHTML = `<p style='text-align:center; padding: 2rem; color: #64748b;'>Nenhum resultado encontrado.</p>`;
             return;
         }
 
+        // ======================================================
+        // PAGINAÇÃO (Corta a lista para mostrar apenas 50)
+        // ======================================================
+        const totalItems = filtered.length;
+        const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+        
+        if (currentPage > totalPages) currentPage = totalPages;
+        if (currentPage < 1) currentPage = 1;
+        
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const paginated = filtered.slice(startIndex, startIndex + itemsPerPage);
+
         // montar tabela
         let html = `
+        <div style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; color: #64748b;">
+            <span>Mostrando <b>${paginated.length}</b> de <b>${totalItems}</b> registros (Página ${currentPage} de ${totalPages})</span>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -143,7 +172,7 @@ export async function loadDocumentationList(searchQuery = "") {
             </thead>
             <tbody>`;
 
-        filtered.forEach(doc => {
+        paginated.forEach(doc => {
             const data = doc.data();
             const id = doc.id;
             const dt = data.data_hora?.toDate();
@@ -193,7 +222,37 @@ export async function loadDocumentationList(searchQuery = "") {
         });
 
         html += "</tbody></table>";
+
+        // ======================================================
+        // CONTROLES DE PAGINAÇÃO (Botões Anterior e Próximo)
+        // ======================================================
+        if (totalPages > 1) {
+            html += `
+            <div style="display: flex; justify-content: center; gap: 1rem; margin-top: 1.5rem;">
+                <button id="btn-prev-page" class="nav-button" ${currentPage === 1 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background:#f1f5f9; color:#334155;"'}>⬅ Anterior</button>
+                <span style="align-self: center; font-weight: 500; color: #475569;">Página ${currentPage}</span>
+                <button id="btn-next-page" class="nav-button" ${currentPage === totalPages ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background:#f1f5f9; color:#334155;"'}>Próxima ➡</button>
+            </div>`;
+        }
+
         listContainer.innerHTML = html;
+
+        // Adiciona eventos aos botões de paginação recém-criados
+        const btnPrev = document.getElementById("btn-prev-page");
+        const btnNext = document.getElementById("btn-next-page");
+
+        if (btnPrev && currentPage > 1) {
+            btnPrev.addEventListener("click", () => {
+                currentPage--;
+                loadDocumentationList(searchQuery, false);
+            });
+        }
+        if (btnNext && currentPage < totalPages) {
+            btnNext.addEventListener("click", () => {
+                currentPage++;
+                loadDocumentationList(searchQuery, false);
+            });
+        }
 
     } catch (err) {
         console.error(err);
@@ -295,7 +354,7 @@ export function initDocumentation() {
             if (ok) {
                 const mod = await import("./agendamentos/eventos.js");
                 await handlePresenceWithStock(id);
-                await loadDocumentationList();
+                await loadDocumentationList("", true); // forceRefresh
                 showNotification("Presença registrada!", "success");
             }
             return;
@@ -313,7 +372,7 @@ export function initDocumentation() {
             if (ok) {
                 const mod = await import("./agendamentos/eventos.js");
                 await mod.markAppointmentAsAbsent(id);
-                await loadDocumentationList();
+                await loadDocumentationList("", true); // forceRefresh
                 showNotification("Falta registrada!", "warning");
             }
             return;
@@ -332,7 +391,7 @@ export function initDocumentation() {
                 await db.collection("agendamentos").doc(id).update({
                     doc_entregue: true
                 });
-                await loadDocumentationList();
+                await loadDocumentationList("", true); // forceRefresh
                 showNotification("Documento marcado como entregue!", "success");
             }
             return;
@@ -350,7 +409,7 @@ export function initDocumentation() {
             if (ok) {
                 const mod = await import("./agendamentos/eventos.js");
                 await mod.deleteAppointment(id);
-                await loadDocumentationList();
+                await loadDocumentationList("", true); // forceRefresh
                 showNotification("Agendamento excluído!", "success");
             }
             return;
@@ -367,7 +426,7 @@ export function initDocumentation() {
 
             if (ok) {
                 await db.collection("agendamentos").doc(id).delete();
-                await loadDocumentationList();
+                await loadDocumentationList("", true); // forceRefresh
                 showNotification("Registro apagado!", "success");
             }
             return;
@@ -375,10 +434,15 @@ export function initDocumentation() {
     });
     // ===== BUSCA POR ESTAGIÁRIO =====
     const searchInput = document.getElementById("documentation-search-input");
+    let searchTimeout;
     if (searchInput) {
         searchInput.addEventListener("input", () => {
-            const termo = searchInput.value.trim();
-            loadDocumentationList(termo);
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                const termo = searchInput.value.trim();
+                currentPage = 1; // Reseta para a primeira página ao buscar
+                loadDocumentationList(termo, false);
+            }, 600); // Aguarda 600ms após parar de digitar
         });
     }
 
@@ -388,7 +452,8 @@ export function initDocumentation() {
         monthFilter.addEventListener("change", () => {
             monthFilter.setAttribute("data-user-changed", "true");
             const termo = searchInput ? searchInput.value.trim() : "";
-            loadDocumentationList(termo);
+            currentPage = 1; // Reseta a paginação
+            loadDocumentationList(termo, false);
         });
     }
 
@@ -414,7 +479,8 @@ export function initDocumentation() {
             btn.style.fontWeight = "600";
             
             const searchInput = document.getElementById("documentation-search-input");
-            loadDocumentationList(searchInput ? searchInput.value.trim() : "");
+            currentPage = 1; // Reseta a paginação
+            loadDocumentationList(searchInput ? searchInput.value.trim() : "", false);
         });
     });
 
