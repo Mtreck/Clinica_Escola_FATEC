@@ -802,6 +802,16 @@ tr:hover td {
         padding: 1rem;
     }
 
+    /* Permite que a toolbar do calendário se ajuste um pouco */
+    .fc .fc-toolbar {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .fc .fc-toolbar-title {
+        font-size: 1.2rem !important;
+    }
+
     /* Cards e Grid */
     .room-cards-grid {
         grid-template-columns: 1fr;
@@ -820,6 +830,34 @@ tr:hover td {
     td,
     tr {
         display: block;
+    }
+    
+    /* Restaurar o comportamento nativo de tabela para o FullCalendar */
+    .fc table { display: table !important; width: 100% !important; }
+    .fc thead { display: table-header-group !important; }
+    .fc tbody { display: table-row-group !important; }
+    .fc tr { display: table-row !important; }
+    .fc th, .fc td { display: table-cell !important; }
+    
+    /* Ajustes visuais para o listWeek do FullCalendar */
+    .fc-list-day-cushion {
+        background-color: #f8fafc !important;
+        padding: 12px 16px !important;
+    }
+    .fc-list-day-text {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #3b82f6;
+        text-transform: capitalize;
+    }
+    /* Oculta colunas desnecessárias com alta especificidade */
+    .fc .fc-list-event-time, 
+    .fc td.fc-list-event-time {
+        display: none !important; 
+    }
+    .fc .fc-list-event-graphic,
+    .fc td.fc-list-event-graphic {
+        display: none !important; 
     }
 
     thead tr {
