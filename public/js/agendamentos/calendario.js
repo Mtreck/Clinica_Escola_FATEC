@@ -38,6 +38,7 @@ export function showRoomCalendar(roomName) {
     calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'dayGridWeek',
         locale: 'pt-br',
+        weekends: false,
         headerToolbar: { left:'prev,next today', center:'title', right:'dayGridWeek,dayGridMonth' },
         selectable: true,
         height: 'auto',

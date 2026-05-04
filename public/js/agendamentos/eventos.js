@@ -4,6 +4,7 @@ import { showNotification } from "../utils/notificacao.js";
 import { customConfirm } from "../utils/confirm.js";
 import { refetchCalendar } from "./calendario.js";
 import { formatDateTime } from "../utils/helpers.js";
+import { invalidateDocumentationCache } from "../documentacao.js";
 
 export async function loadTestOptions() {
     const select = document.getElementById('modal-teste');
@@ -163,6 +164,7 @@ export async function saveNewAppointment() {
 
             loadTodayAppointments();
             refetchCalendar();
+            invalidateDocumentationCache();
             return;
         }
 
@@ -209,6 +211,7 @@ export async function saveNewAppointment() {
 
         loadTodayAppointments();
         refetchCalendar();
+        invalidateDocumentationCache();
 
     } catch (e) {
         console.error("saveNewAppointment", e);
@@ -242,6 +245,7 @@ export async function editAppointment(docId) {
 
         document.querySelector('#appointment-modal h3').textContent = 'Editar Agendamento';
         document.getElementById('modal-save-button').textContent = 'Salvar Edição';
+        document.getElementById('modal-delete-button').classList.remove('hidden');
 
         document.getElementById('appointment-modal').classList.remove('hidden');
     } catch (e) {
@@ -258,6 +262,7 @@ export async function markAppointmentAsAbsent(docId) {
         showNotification('Falta registrada com sucesso.', 'warning');
         loadTodayAppointments();
         refetchCalendar();
+        invalidateDocumentationCache();
     } catch (e) {
         console.error('markAppointmentAsAbsent', e);
         showNotification('Erro ao registrar falta.', 'error');
@@ -276,6 +281,7 @@ export async function deleteAppointment(docId) {
         showNotification('Agendamento excluído.', 'success');
         loadTodayAppointments();
         refetchCalendar();
+        invalidateDocumentationCache();
     } catch (e) {
         console.error('deleteAppointment', e);
         showNotification('Erro ao apagar o agendamento.', 'error');
@@ -292,7 +298,7 @@ export async function markAppointmentAsPresent(docId) {
         showNotification("Presença registrada.", "success");
         loadTodayAppointments();
         refetchCalendar();
-
+        invalidateDocumentationCache();
     } catch (e) {
         console.error("markAppointmentAsPresent", e);
         showNotification("Erro ao registrar presença.", "error");

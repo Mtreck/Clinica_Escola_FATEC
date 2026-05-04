@@ -96,6 +96,50 @@
             50% { opacity: 0.6; transform: scale(1.05); }
             100% { opacity: 0.3; transform: scale(1); }
         }
+
+        /* Estilização dos Botões do Calendário */
+        .fc-button {
+            background-color: #ffffff !important;
+            border: 1px solid #e2e8f0 !important;
+            color: #475569 !important;
+            font-weight: 500 !important;
+            text-transform: capitalize !important;
+            font-size: 0.85rem !important;
+            padding: 6px 12px !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+            transition: all 0.2s !important;
+        }
+        .fc-button:hover {
+            background-color: #f8fafc !important;
+            border-color: #cbd5e1 !important;
+            color: #1e293b !important;
+        }
+        .fc-button-primary:not(:disabled).fc-button-active, 
+        .fc-button-primary:not(:disabled):active {
+            background-color: #eff6ff !important;
+            border-color: #3b82f6 !important;
+            color: #3b82f6 !important;
+        }
+        .fc-button:focus {
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+        }
+        .fc-toolbar-title {
+            font-size: 1.15rem !important;
+            color: #1e293b !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.02em;
+        }
+
+        /* Ajuste para o botão customizado de voltar */
+        .fc-voltarSalas-button {
+            background-color: #f8fafc !important;
+            color: #3b82f6 !important;
+            border-color: #e2e8f0 !important;
+        }
+        .fc-voltarSalas-button:hover {
+            background-color: #eff6ff !important;
+            border-color: #3b82f6 !important;
+        }
     </style>
 </head>
 

@@ -160,9 +160,25 @@ function initCalendar() {
 
     const isMobile = window.innerWidth < 768;
 
+    const now = new Date();
+    // Início da semana atual (Domingo)
+    const startRange = new Date(now);
+    startRange.setDate(now.getDate() - now.getDay());
+    startRange.setHours(0, 0, 0, 0);
+
+    // Fim da próxima semana (Sábado). Como o 'end' do validRange é exclusivo, 
+    // somamos 14 dias ao início da semana atual para chegar ao próximo domingo.
+    const endRange = new Date(startRange);
+    endRange.setDate(startRange.getDate() + 14);
+
     calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: isMobile ? 'listWeek' : 'dayGridWeek',
         locale: 'pt-br',
+        weekends: false,
+        validRange: {
+            start: startRange,
+            end: endRange
+        },
         customButtons: {
             voltarSalas: {
                 text: '⬅ Voltar às Salas',
@@ -174,7 +190,7 @@ function initCalendar() {
         headerToolbar: {
             left: 'voltarSalas',
             center: 'title',
-            right: ''
+            right: 'today prev,next'
         },
         height: 'auto',
         events: fetchAllEvents,

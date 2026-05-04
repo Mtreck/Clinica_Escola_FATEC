@@ -11,6 +11,11 @@ let lastFetchTime = 0;
 let currentPage = 1;
 const itemsPerPage = 50;
 
+export function invalidateDocumentationCache() {
+    cachedSnapshot = null;
+    lastFetchTime = 0;
+}
+
 // ======================================================
 //                  CARREGAR LISTA
 // ======================================================
@@ -29,7 +34,7 @@ export async function loadDocumentationList(searchQuery = "", forceRefresh = fal
             cachedSnapshot = await db
                 .collection("agendamentos")
                 .orderBy("data_hora", "desc")
-                .limit(500) // Traz os 500 mais recentes de uma vez e guarda na memória
+                .limit(2000) // Traz os 2000 mais recentes de uma vez e guarda na memória
                 .get();
             lastFetchTime = now;
         }
@@ -60,11 +65,12 @@ export async function loadDocumentationList(searchQuery = "", forceRefresh = fal
         const monthSelect = document.getElementById("documentation-month-filter");
         
         if (monthSelect) {
-            // Extrair meses únicos dentro dos itens que passaram pelo filtro de Aba
+            // Extrair meses únicos dentro de TODOS os itens carregados (sem o filtro de Aba)
+            // para que o dropdown sempre mostre todos os meses que possuem dados.
             const availableMonths = new Set();
-            filtered.forEach(doc => {
+            cachedSnapshot.docs.forEach(doc => {
                 const dt = doc.data().data_hora?.toDate();
-                if (dt) availableMonths.add(`${(dt.getMonth() + 1).toString().padStart(2, '0')}/${dt.getFullYear()}`);
+                if (dt) availableMonths.add(`${(dt.getMonth() + 1).toString().padStart(2, "0")}/${dt.getFullYear()}`);
             });
             const sortedMonths = Array.from(availableMonths).sort((a, b) => {
                 const [mA, yA] = a.split('/');

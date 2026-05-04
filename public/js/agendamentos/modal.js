@@ -1,7 +1,6 @@
 // js/agendamentos/modal.js
-import { saveNewAppointment } from "./eventos.js";
+import { saveNewAppointment, deleteAppointment } from "./eventos.js";
 import { loadTestOptions } from "./eventos.js"; 
-
 // Fecha QUALQUER modal preso logo no começo
 export function forceCloseConfirmModal() {
     const m = document.getElementById("custom-confirm-modal");
@@ -14,6 +13,7 @@ export function setupAppointmentModal() {
 
     const cancelBtn = document.getElementById('modal-cancel-button');
     const saveBtn = document.getElementById('modal-save-button');
+    const deleteBtn = document.getElementById('modal-delete-button');
 
     if (cancelBtn) {
         cancelBtn.onclick = () => {
@@ -29,6 +29,16 @@ export function setupAppointmentModal() {
         saveBtn.onclick = () => {
             forceCloseConfirmModal(); // <<< evita modal preso
             saveNewAppointment();
+        };
+    }
+
+    if (deleteBtn) {
+        deleteBtn.onclick = () => {
+            const docId = document.getElementById('modal-appointment-doc-id').value;
+            if (docId) {
+                document.getElementById('appointment-modal').classList.add('hidden');
+                deleteAppointment(docId);
+            }
         };
     }
 }
@@ -50,6 +60,7 @@ export function openManualAppointment() {
     // volta título e botão para "novo agendamento"
     document.querySelector('#appointment-modal h3').textContent = 'Agendar Novo Atendimento';
     document.getElementById('modal-save-button').textContent = 'Salvar Agendamento';
+    document.getElementById('modal-delete-button').classList.add('hidden');
 
     document.getElementById('appointment-modal').classList.remove('hidden');
 }
