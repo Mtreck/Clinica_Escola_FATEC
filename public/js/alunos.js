@@ -350,7 +350,9 @@ async function fetchAllEvents(fetchInfo, successCallback, failureCallback) {
             });
         });
 
-        const snap = await db.collection('agendamentos')
+        // Área do Aluno não exige login: usa o espelho público (sem nomes/iniciais de paciente),
+        // nunca a coleção "agendamentos" (essa fica restrita à administração).
+        const snap = await db.collection('agenda_publica')
             .where('sala', '==', selectedRoom)
             .where('data_hora', '>=', start)
             .where('data_hora', '<', end)

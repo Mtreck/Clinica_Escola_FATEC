@@ -6,7 +6,7 @@ import { loadTodayAppointments, loadTestOptions } from "./agendamentos/eventos.j
 import { setupAppointmentModal, openManualAppointment } from "./agendamentos/modal.js";
 import { setupRoomCards, showRoomCards } from "./agendamentos/calendario.js";
 import { loadInventoryList, checkLowStockAlerts, showAddTestModal, saveNewTest } from "./inventario.js";
-import { loadDocumentationList, initDocumentation } from "./documentacao.js";
+import { loadDuplasList, initDuplasControl } from "./documentacao.js";
 import { setupAdvancedSearch } from "./agendamentos/Busca_avancada.js";
 import { initRecados, loadRecadosList } from "./recados.js";
 
@@ -39,7 +39,7 @@ export async function initializeDashboard() {
     // ========== INICIALIZAÇÕES ESPECÍFICAS ==========
     setupRoomCards();
     setupAdvancedSearch();
-    initDocumentation();
+    initDuplasControl();
     initRecados();
 
     // Carrega opções de testes
@@ -129,7 +129,7 @@ function setupNavigation() {
                 showRoomCards();
                 loadTodayAppointments();
             } else if (targetModuleId === "documentacao") {
-                loadDocumentationList("");
+                loadDuplasList();
             } else if (targetModuleId === "inventario") {
                 loadInventoryList();
             } else if (targetModuleId === "recados") {

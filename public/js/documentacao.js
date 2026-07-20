@@ -3,270 +3,483 @@ import { db } from "./firebase.js";
 import { customConfirm } from "./utils/confirm.js";
 import { showNotification } from "./utils/notificacao.js";
 
+// ======================================================
+//   CONTROLE DE DOCUMENTAÇÃO — POR DUPLA
+// ======================================================
+// Substitui o antigo modelo (1 registro de documentação por atendimento).
+// A secretaria lança manualmente cada atendimento contra a dupla responsável;
+// agendar uma sessão no calendário não cria mais nada aqui automaticamente.
+
+let cachedDuplas = null; // [{ id, nome, ativo, lancamentos: [...] }]
+const expandedIds = new Set();
+let editingNomeId = null;
 let _delegationInitialized = false;
 
-// Variáveis de Cache e Paginação
-let cachedSnapshot = null;
-let lastFetchTime = 0;
-let currentPage = 1;
-const itemsPerPage = 50;
-
-export function invalidateDocumentationCache() {
-    cachedSnapshot = null;
-    lastFetchTime = 0;
+export async function initDuplasControl() {
+    setupToolbar();
+    setupNovaDupla();
+    setupCsvButton();
+    if (!_delegationInitialized) {
+        setupListDelegation();
+        _delegationInitialized = true;
+    }
+    await loadDuplasList();
 }
 
 // ======================================================
-//                  CARREGAR LISTA
+//                  CARREGAR DADOS
 // ======================================================
-export async function loadDocumentationList(searchQuery = "", forceRefresh = false) {
-    const listContainer = document.getElementById("documentation-list");
-    if (!listContainer) return;
+export async function loadDuplasList() {
+    const container = document.getElementById('duplas-list');
+    if (!container) return;
 
-    if (!cachedSnapshot || forceRefresh) {
-        listContainer.innerHTML = "<p style='text-align:center; padding: 2rem; color: #64748b;'>Carregando dados do banco...</p>";
+    if (!cachedDuplas) {
+        container.innerHTML = '<p class="duplas-empty-state">Carregando duplas...</p>';
     }
 
     try {
-        const now = Date.now();
-        // Busca no banco APENAS se não tiver cache, se for forçado, ou se passou 5 minutos
-        if (forceRefresh || !cachedSnapshot || (now - lastFetchTime > 300000)) {
-            cachedSnapshot = await db
-                .collection("agendamentos")
-                .orderBy("data_hora", "desc")
-                .limit(2000) // Traz os 2000 mais recentes de uma vez e guarda na memória
-                .get();
-            lastFetchTime = now;
-        }
+        const [duplasSnap, lancamentosSnap] = await Promise.all([
+            db.collection('duplas').get(),
+            db.collectionGroup('lancamentos').get()
+        ]);
 
-        let filtered = cachedSnapshot.docs;
-
-        // ======================================================
-        // FILTRAGEM POR ABA
-        // ======================================================
-        const activeTabBtn = document.querySelector(".doc-tab-btn.active");
-        const activeFilter = activeTabBtn ? activeTabBtn.getAttribute("data-filter") : "pendente_presenca";
-
-        filtered = filtered.filter(doc => {
-            const data = doc.data();
-            if (activeFilter === "pendente_presenca") {
-                return !data.presenca_aluno;
-            } else if (activeFilter === "doc_pendente") {
-                return data.presenca_aluno && !data.doc_entregue;
-            } else if (activeFilter === "concluido") {
-                return data.presenca_aluno && data.doc_entregue;
-            }
-            return true;
+        const lancamentosPorDupla = {};
+        lancamentosSnap.forEach(doc => {
+            const duplaId = doc.ref.parent.parent.id;
+            if (!lancamentosPorDupla[duplaId]) lancamentosPorDupla[duplaId] = [];
+            lancamentosPorDupla[duplaId].push({ id: doc.id, ...doc.data() });
         });
 
-        // ======================================================
-        // FILTRAGEM POR MÊS
-        // ======================================================
-        const monthSelect = document.getElementById("documentation-month-filter");
-        
-        if (monthSelect) {
-            // Extrair meses únicos dentro de TODOS os itens carregados (sem o filtro de Aba)
-            // para que o dropdown sempre mostre todos os meses que possuem dados.
-            const availableMonths = new Set();
-            cachedSnapshot.docs.forEach(doc => {
-                const dt = doc.data().data_hora?.toDate();
-                if (dt) availableMonths.add(`${(dt.getMonth() + 1).toString().padStart(2, "0")}/${dt.getFullYear()}`);
-            });
-            const sortedMonths = Array.from(availableMonths).sort((a, b) => {
-                const [mA, yA] = a.split('/');
-                const [mB, yB] = b.split('/');
-                return new Date(yB, mB - 1) - new Date(yA, mA - 1); // mais recente primeiro
-            });
+        cachedDuplas = duplasSnap.docs.map(doc => {
+            const lancamentos = (lancamentosPorDupla[doc.id] || [])
+                .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+            return { id: doc.id, ...doc.data(), lancamentos };
+        });
 
-            // Guardar mês que estava selecionado
-            let currentSelectedMonth = monthSelect.value;
+        renderDuplasList();
+    } catch (e) {
+        console.error('loadDuplasList', e);
+        container.innerHTML = '<p class="duplas-empty-state">Erro ao carregar as duplas. Verifique sua conexão ou permissões.</p>';
+    }
+}
 
-            if (!monthSelect.hasAttribute("data-user-changed")) {
-                const now = new Date();
-                currentSelectedMonth = `${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()}`;
-            }
-            
-            // Recriar lista de opções
-            monthSelect.innerHTML = '<option value="all">Todos os Meses</option>';
-            sortedMonths.forEach(m => {
-                const opt = document.createElement("option");
-                opt.value = m;
-                opt.textContent = m;
-                if (m === currentSelectedMonth) opt.selected = true;
-                monthSelect.appendChild(opt);
+// ======================================================
+//                  RENDERIZAÇÃO
+// ======================================================
+function renderDuplasList() {
+    const container = document.getElementById('duplas-list');
+    const summary = document.getElementById('duplas-summary');
+    if (!container || !cachedDuplas) return;
+
+    const searchInput = document.getElementById('duplas-search-input');
+    const showArchived = document.getElementById('duplas-show-archived');
+    const termo = (searchInput?.value || '').trim().toLowerCase();
+    const mostrarArquivadas = showArchived?.checked || false;
+
+    let lista = cachedDuplas.filter(d => mostrarArquivadas || d.ativo !== false);
+    if (termo) {
+        lista = lista.filter(d => (d.nome || '').toLowerCase().includes(termo));
+    }
+
+    lista = lista.map(d => {
+        const pendentes = d.lancamentos.filter(l => !l.entregue).length;
+        const entregues = d.lancamentos.length - pendentes;
+        return { ...d, pendentes, entregues };
+    });
+
+    // Quem ainda tem pendência sobe para o topo; empate resolvido por ordem alfabética
+    lista.sort((a, b) => {
+        if (b.pendentes !== a.pendentes) return b.pendentes - a.pendentes;
+        return (a.nome || '').localeCompare(b.nome || '');
+    });
+
+    if (summary) {
+        const totalAtivas = cachedDuplas.filter(d => d.ativo !== false).length;
+        const totalPendentes = cachedDuplas
+            .filter(d => d.ativo !== false)
+            .reduce((sum, d) => sum + d.lancamentos.filter(l => !l.entregue).length, 0);
+
+        summary.textContent = totalAtivas === 0
+            ? ''
+            : `${totalAtivas} dupla${totalAtivas === 1 ? '' : 's'} ativa${totalAtivas === 1 ? '' : 's'} · ${totalPendentes} atendimento${totalPendentes === 1 ? '' : 's'} pendente${totalPendentes === 1 ? '' : 's'} de documentação`;
+    }
+
+    if (lista.length === 0) {
+        container.innerHTML = `<p class="duplas-empty-state">${termo
+            ? 'Nenhuma dupla encontrada para essa busca.'
+            : 'Nenhuma dupla cadastrada ainda. Use "+ Nova Dupla" acima para começar.'
+            }</p>`;
+        return;
+    }
+
+    container.innerHTML = lista.map(renderDuplaItem).join('');
+}
+
+function renderDuplaItem(dupla) {
+    const isExpanded = expandedIds.has(dupla.id);
+    const isEditingNome = editingNomeId === dupla.id;
+    const isArchived = dupla.ativo === false;
+
+    const badges = [];
+    if (dupla.pendentes > 0) {
+        badges.push(`<span class="status-pending">${dupla.pendentes} pendente${dupla.pendentes === 1 ? '' : 's'}</span>`);
+    } else {
+        badges.push('<span class="status-ok">Em dia</span>');
+    }
+    if (dupla.entregues > 0) {
+        badges.push(`<span class="status-default">${dupla.entregues} entregue${dupla.entregues === 1 ? '' : 's'}</span>`);
+    }
+
+    const nomeHtml = isEditingNome
+        ? `<input type="text" class="dupla-nome-input" data-id="${dupla.id}" value="${escapeAttr(dupla.nome || '')}">`
+        : `<span class="dupla-nome">${escapeHtml(dupla.nome || '')}</span>`;
+
+    const nomeActionsHtml = isEditingNome
+        ? `<button type="button" class="dupla-nome-save" data-id="${dupla.id}" title="Salvar nome">✔</button>
+           <button type="button" class="dupla-nome-cancel" title="Cancelar">✖</button>`
+        : `<button type="button" class="dupla-rename" data-id="${dupla.id}" title="Renomear dupla">✎</button>
+           <button type="button" class="dupla-archive" data-id="${dupla.id}" data-ativo="${dupla.ativo !== false}" title="${isArchived ? 'Reativar dupla' : 'Arquivar dupla'}">${isArchived ? '↺' : '🗄'}</button>`;
+
+    return `
+        <div class="dupla-item ${isExpanded ? 'expanded' : ''} ${isArchived ? 'arquivada' : ''}" data-id="${dupla.id}">
+            <div class="dupla-header" data-id="${dupla.id}">
+                <span class="dupla-chevron">▶</span>
+                ${nomeHtml}
+                <div class="dupla-badges">${badges.join('')}</div>
+                <div class="dupla-actions">${nomeActionsHtml}</div>
+            </div>
+            <div class="dupla-panel-wrapper">
+                <div class="dupla-panel">
+                    <div class="dupla-panel-inner">
+                        <form class="add-lancamento-form" data-id="${dupla.id}">
+                            <input type="date" class="add-lancamento-date" value="${todayStr()}" required>
+                            <input type="text" class="add-lancamento-obs" placeholder="Observação (opcional)">
+                            <button type="submit" class="btn-secondary">+ Lançar Atendimento</button>
+                        </form>
+                        ${renderLancamentosList(dupla)}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderLancamentosList(dupla) {
+    if (!dupla.lancamentos || dupla.lancamentos.length === 0) {
+        return '<p class="dupla-panel-empty">Nenhum atendimento lançado ainda. Use o campo acima para começar.</p>';
+    }
+
+    const rows = dupla.lancamentos.map(l => `
+        <div class="lancamento-row" data-dupla-id="${dupla.id}" data-id="${l.id}">
+            <label>
+                <input type="checkbox" class="lancamento-check" data-dupla-id="${dupla.id}" data-id="${l.id}" ${l.entregue ? 'checked' : ''}>
+                Entregue
+            </label>
+            <span class="lancamento-date">${formatDataStr(l.data)}</span>
+            <span class="lancamento-obs">${escapeHtml(l.observacao || '')}</span>
+            <button type="button" class="lancamento-remove" data-dupla-id="${dupla.id}" data-id="${l.id}" title="Remover lançamento">✖</button>
+        </div>
+    `).join('');
+
+    return `<div class="lancamentos-list">${rows}</div>`;
+}
+
+// ======================================================
+//                  TOOLBAR (busca / arquivadas)
+// ======================================================
+function setupToolbar() {
+    const searchInput = document.getElementById('duplas-search-input');
+    const showArchived = document.getElementById('duplas-show-archived');
+
+    let searchTimeout;
+    if (searchInput && !searchInput.dataset.bound) {
+        searchInput.dataset.bound = 'true';
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => renderDuplasList(), 300);
+        });
+    }
+
+    if (showArchived && !showArchived.dataset.bound) {
+        showArchived.dataset.bound = 'true';
+        showArchived.addEventListener('change', () => renderDuplasList());
+    }
+}
+
+// ======================================================
+//                  CRIAR NOVA DUPLA (INLINE)
+// ======================================================
+function setupNovaDupla() {
+    const toggleBtn = document.getElementById('nova-dupla-toggle-btn');
+    const form = document.getElementById('nova-dupla-form');
+    const cancelBtn = document.getElementById('nova-dupla-cancel-btn');
+    const nomeInput = document.getElementById('nova-dupla-nome');
+    if (!toggleBtn || !form || !cancelBtn || !nomeInput) return;
+
+    if (toggleBtn.dataset.bound) return;
+    toggleBtn.dataset.bound = 'true';
+
+    toggleBtn.addEventListener('click', () => {
+        form.classList.remove('hidden');
+        toggleBtn.classList.add('hidden');
+        nomeInput.focus();
+    });
+
+    cancelBtn.addEventListener('click', () => {
+        form.reset();
+        form.classList.add('hidden');
+        toggleBtn.classList.remove('hidden');
+    });
+
+    form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const nome = nomeInput.value.trim();
+        if (!nome) return;
+
+        try {
+            await db.collection('duplas').add({
+                nome,
+                ativo: true,
+                criadoEm: firebase.firestore.FieldValue.serverTimestamp()
             });
-
-            // Aplicar o filtro na variavel filtered, usando o mês que acabou ficando selecionado
-            if (monthSelect.value !== "all") {
-                filtered = filtered.filter(doc => {
-                    const dt = doc.data().data_hora?.toDate();
-                    if (!dt) return false;
-                    const mesAno = `${(dt.getMonth() + 1).toString().padStart(2, '0')}/${dt.getFullYear()}`;
-                    return mesAno === monthSelect.value;
-                });
-            }
+            form.reset();
+            form.classList.add('hidden');
+            toggleBtn.classList.remove('hidden');
+            showNotification('Dupla adicionada.', 'success');
+            await loadDuplasList();
+        } catch (e) {
+            console.error('criar dupla', e);
+            showNotification('Erro ao adicionar dupla.', 'error');
         }
+    });
+}
 
-        // ======================================================
-        // 🔍 BUSCA INTELIGENTE: NOME OU DATA NO MESMO INPUT
-        // ======================================================
-        if (searchQuery) {
-            let termo = searchQuery.trim().toLowerCase();
+// ======================================================
+//   DELEGAÇÃO DE EVENTOS DA LISTA (expandir, renomear,
+//   arquivar, lançar/alternar/remover atendimento)
+// ======================================================
+function setupListDelegation() {
+    const container = document.getElementById('duplas-list');
+    if (!container) return;
 
-            // normaliza separador de data: transforma "-" em "/"
-            const termoNormalizado = termo.replace(/-/g, "/");
+    container.addEventListener('click', async (ev) => {
+        // Digitar no campo de renomear não deve expandir/colapsar o painel
+        if (ev.target.closest('.dupla-nome-input')) return;
 
-            const temLetra = /[a-zA-Z]/.test(termoNormalizado);
+        const renameBtn = ev.target.closest('.dupla-rename');
+        const archiveBtn = ev.target.closest('.dupla-archive');
+        const saveBtn = ev.target.closest('.dupla-nome-save');
+        const cancelBtn = ev.target.closest('.dupla-nome-cancel');
+        const removeBtn = ev.target.closest('.lancamento-remove');
+        const header = ev.target.closest('.dupla-header');
 
-            if (temLetra) {
-                // -------- BUSCA POR NOME DO ESTAGIÁRIO --------
-                filtered = filtered.filter(doc => {
-                    const nome = (doc.data().estagiario_nome || "").toLowerCase();
-                    return nome.includes(termoNormalizado);
-                });
-            } else {
-                // -------- BUSCA POR DATA --------
-                // exemplo: 11/12, 11/12/2025, 11-12, 11-12-2025
-                filtered = filtered.filter(doc => {
-                    const dataHora = doc.data().data_hora;
-                    if (!dataHora) return false;
-
-                    const dt = dataHora.toDate();
-                    const dataStr = dt
-                        .toLocaleDateString("pt-BR") // ex: "11/12/2025"
-                        .toLowerCase();
-
-                    // compara apenas por "includes" (permite 11/12 ou 11/12/2025)
-                    return dataStr.includes(termoNormalizado);
-                });
-            }
-        }
-        // ======================================================
-
-        if (filtered.length === 0) {
-            listContainer.innerHTML = `<p style='text-align:center; padding: 2rem; color: #64748b;'>Nenhum resultado encontrado.</p>`;
+        if (renameBtn) {
+            editingNomeId = renameBtn.dataset.id;
+            renderDuplasList();
             return;
         }
 
-        // ======================================================
-        // PAGINAÇÃO (Corta a lista para mostrar apenas 50)
-        // ======================================================
-        const totalItems = filtered.length;
-        const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
-        
-        if (currentPage > totalPages) currentPage = totalPages;
-        if (currentPage < 1) currentPage = 1;
-        
-        const startIndex = (currentPage - 1) * itemsPerPage;
-        const paginated = filtered.slice(startIndex, startIndex + itemsPerPage);
+        if (cancelBtn) {
+            editingNomeId = null;
+            renderDuplasList();
+            return;
+        }
 
-        // montar tabela
-        let html = `
-        <div style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; color: #64748b;">
-            <span>Mostrando <b>${paginated.length}</b> de <b>${totalItems}</b> registros (Página ${currentPage} de ${totalPages})</span>
-        </div>
-        <table>
-            <thead>
-                <tr>
-                    <th>Estagiário</th>
-                    <th>Sala</th>
-                    <th>Data</th>
-                    <th>Teste</th>
-                    <th>Status</th>
-                    <th>Ações</th>
-                </tr>
-            </thead>
-            <tbody>`;
-
-        paginated.forEach(doc => {
-            const data = doc.data();
-            const id = doc.id;
-            const dt = data.data_hora?.toDate();
-            const dataFormatada = dt ? dt.toLocaleDateString("pt-BR") : "N/A";
-
-            let statusClass = "status-default";
-            let statusText = "Pendente";
-            let actions = "";
-
-            if (!data.presenca_aluno) {
-                statusClass = "status-nao-atendido";
-                statusText = "Não Atendido";
-
-                actions = `
-                    <button class="action-mark-presence" data-id="${id}">Presença</button>
-                    <button class="action-mark-absence" data-id="${id}">Falta</button>
-                    <button class="action-delete" data-id="${id}">Excluir</button>
-                `;
-            } else {
-                if (data.doc_entregue) {
-                    statusClass = "status-ok";
-                    statusText = "Entregue";
-                    actions = `
-                        <button class="action-delete-completed" data-id="${id}">Apagar</button>
-                    `;
-                } else {
-                    statusClass = "status-pending";
-                    statusText = "Doc. Pendente";
-
-                    actions = `
-                        <button class="action-mark-delivered" data-id="${id}">Entregue</button>
-                        <button class="action-delete" data-id="${id}">Excluir</button>
-                    `;
-                }
+        if (saveBtn) {
+            const id = saveBtn.dataset.id;
+            const input = container.querySelector(`.dupla-nome-input[data-id="${id}"]`);
+            const novoNome = input ? input.value.trim() : '';
+            if (!novoNome) {
+                showNotification('Digite um nome válido.', 'warning');
+                return;
             }
-
-            html += `
-                <tr>
-                    <td data-label="Estagiário">${data.estagiario_nome}</td>
-                    <td data-label="Sala">${data.sala || "N/A"}</td>
-                    <td data-label="Data">${dataFormatada}</td>
-                    <td data-label="Teste">${data.teste_usado || ""}</td>
-                    <td data-label="Status"><span class="${statusClass}">${statusText}</span></td>
-                    <td data-label="Ações">${actions}</td>
-                </tr>
-            `;
-        });
-
-        html += "</tbody></table>";
-
-        // ======================================================
-        // CONTROLES DE PAGINAÇÃO (Botões Anterior e Próximo)
-        // ======================================================
-        if (totalPages > 1) {
-            html += `
-            <div style="display: flex; justify-content: center; gap: 1rem; margin-top: 1.5rem;">
-                <button id="btn-prev-page" class="nav-button" ${currentPage === 1 ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background:#f1f5f9; color:#334155;"'}>⬅ Anterior</button>
-                <span style="align-self: center; font-weight: 500; color: #475569;">Página ${currentPage}</span>
-                <button id="btn-next-page" class="nav-button" ${currentPage === totalPages ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background:#f1f5f9; color:#334155;"'}>Próxima ➡</button>
-            </div>`;
+            try {
+                await db.collection('duplas').doc(id).update({ nome: novoNome });
+                editingNomeId = null;
+                showNotification('Nome atualizado.', 'success');
+                await loadDuplasList();
+            } catch (e) {
+                console.error('renomear dupla', e);
+                showNotification('Erro ao renomear a dupla.', 'error');
+            }
+            return;
         }
 
-        listContainer.innerHTML = html;
+        if (archiveBtn) {
+            const id = archiveBtn.dataset.id;
+            const estaAtiva = archiveBtn.dataset.ativo === 'true';
+            const confirmed = await customConfirm(
+                estaAtiva
+                    ? 'Deseja arquivar esta dupla? O histórico de lançamentos é mantido e ela pode ser reativada depois.'
+                    : 'Deseja reativar esta dupla?',
+                estaAtiva ? 'Arquivar Dupla' : 'Reativar Dupla',
+                estaAtiva ? 'Arquivar' : 'Reativar',
+                estaAtiva ? '#f59e0b' : '#10b981'
+            );
+            if (!confirmed) return;
+            try {
+                await db.collection('duplas').doc(id).update({ ativo: !estaAtiva });
+                showNotification(estaAtiva ? 'Dupla arquivada.' : 'Dupla reativada.', 'success');
+                await loadDuplasList();
+            } catch (e) {
+                console.error('arquivar dupla', e);
+                showNotification('Erro ao atualizar a dupla.', 'error');
+            }
+            return;
+        }
 
-        // Adiciona eventos aos botões de paginação recém-criados
-        const btnPrev = document.getElementById("btn-prev-page");
-        const btnNext = document.getElementById("btn-next-page");
+        if (removeBtn) {
+            const duplaId = removeBtn.dataset.duplaId;
+            const lancId = removeBtn.dataset.id;
+            const confirmed = await customConfirm('Deseja remover este lançamento?', 'Remover Lançamento', 'Remover', '#dc3545');
+            if (!confirmed) return;
+            try {
+                await db.collection('duplas').doc(duplaId).collection('lancamentos').doc(lancId).delete();
+                showNotification('Lançamento removido.', 'success');
+                await loadDuplasList();
+            } catch (e) {
+                console.error('remover lançamento', e);
+                showNotification('Erro ao remover o lançamento.', 'error');
+            }
+            return;
+        }
 
-        if (btnPrev && currentPage > 1) {
-            btnPrev.addEventListener("click", () => {
-                currentPage--;
-                loadDocumentationList(searchQuery, false);
+        // O clique no cabeçalho só expande/colapsa se nenhuma ação acima já tratou o evento
+        if (header) {
+            const id = header.dataset.id;
+            if (expandedIds.has(id)) expandedIds.delete(id);
+            else expandedIds.add(id);
+            header.closest('.dupla-item').classList.toggle('expanded');
+        }
+    });
+
+    container.addEventListener('change', async (ev) => {
+        const check = ev.target.closest('.lancamento-check');
+        if (!check) return;
+
+        const duplaId = check.dataset.duplaId;
+        const lancId = check.dataset.id;
+        const entregue = check.checked;
+
+        try {
+            await db.collection('duplas').doc(duplaId).collection('lancamentos').doc(lancId).update({
+                entregue,
+                dataEntrega: entregue ? firebase.firestore.FieldValue.serverTimestamp() : null
             });
+            await loadDuplasList();
+        } catch (e) {
+            console.error('atualizar status do lançamento', e);
+            showNotification('Erro ao atualizar o status.', 'error');
+            check.checked = !entregue;
         }
-        if (btnNext && currentPage < totalPages) {
-            btnNext.addEventListener("click", () => {
-                currentPage++;
-                loadDocumentationList(searchQuery, false);
-            });
-        }
+    });
 
-    } catch (err) {
-        console.error(err);
-        listContainer.innerHTML = "<p style='color:red'>Erro ao carregar.</p>";
-    }
+    container.addEventListener('submit', async (ev) => {
+        const form = ev.target.closest('.add-lancamento-form');
+        if (!form) return;
+        ev.preventDefault();
+
+        const duplaId = form.dataset.id;
+        const data = form.querySelector('.add-lancamento-date').value;
+        const observacao = form.querySelector('.add-lancamento-obs').value.trim();
+        if (!data) return;
+
+        try {
+            expandedIds.add(duplaId); // mantém o painel aberto após o recarregamento
+            await db.collection('duplas').doc(duplaId).collection('lancamentos').add({
+                data,
+                observacao,
+                entregue: false,
+                criadoEm: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            showNotification('Atendimento lançado.', 'success');
+            await loadDuplasList();
+        } catch (e) {
+            console.error('lançar atendimento', e);
+            showNotification('Erro ao lançar o atendimento.', 'error');
+        }
+    });
 }
+
 // ======================================================
-//   Export para busca avançada (mantido se necessário)
+//                  RELATÓRIO CSV
+// ======================================================
+function setupCsvButton() {
+    const btn = document.getElementById('generate-duplas-report');
+    if (!btn || btn.dataset.bound) return;
+    btn.dataset.bound = 'true';
+    btn.addEventListener('click', generateDuplasCSV);
+}
+
+function generateDuplasCSV() {
+    if (!cachedDuplas || cachedDuplas.length === 0) {
+        showNotification('Nenhum dado para gerar o relatório.', 'warning');
+        return;
+    }
+
+    let csv = 'Dupla;Data;Status;Observação\n';
+    let linhas = 0;
+
+    cachedDuplas.forEach(dupla => {
+        if (!dupla.lancamentos || dupla.lancamentos.length === 0) return;
+        dupla.lancamentos
+            .slice()
+            .sort((a, b) => (a.data || '').localeCompare(b.data || ''))
+            .forEach(l => {
+                const status = l.entregue ? 'Entregue' : 'Pendente';
+                const obs = (l.observacao || '').replace(/;/g, ',');
+                csv += `${dupla.nome || ''};${formatDataStr(l.data)};${status};${obs}\n`;
+                linhas++;
+            });
+    });
+
+    if (linhas === 0) {
+        showNotification('Nenhum atendimento lançado para gerar o relatório.', 'warning');
+        return;
+    }
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `controle-documentacao-${todayStr()}.csv`;
+    link.style.display = 'none';
+
+    document.body.appendChild(link);
+    link.click();
+    URL.revokeObjectURL(url);
+    link.remove();
+
+    showNotification('Relatório CSV gerado com sucesso!', 'success');
+}
+
+// ======================================================
+//                  HELPERS
+// ======================================================
+function todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatDataStr(dataStr) {
+    if (!dataStr) return '';
+    const [y, m, d] = dataStr.split('-');
+    return `${d}/${m}/${y}`;
+}
+
+function escapeHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+function escapeAttr(str) {
+    return escapeHtml(str);
+}
+
+// ======================================================
+//   Export para a Pesquisa Avançada de Agenda (aba
+//   Agendamentos) — não relacionado ao controle por dupla.
 // ======================================================
 export function displaySearchResults(results, title, container) {
     if (!container) container = document.getElementById("search-results-table");
@@ -304,15 +517,12 @@ export function displaySearchResults(results, title, container) {
         let statusText = "Pendente";
         let statusClass = "status-default";
 
-        if (r.doc_entregue && !r.falta_registrada) {
-            statusText = "Concluído";
-            statusClass = "status-ok";
-        } else if (r.falta_registrada) {
-            statusText = "FALTA (Encerrado)";
+        if (r.falta_registrada) {
+            statusText = "FALTA";
             statusClass = "status-falta";
         } else if (r.presenca_aluno) {
-            statusText = "Doc. Pendente";
-            statusClass = "status-pending";
+            statusText = "Presença confirmada";
+            statusClass = "status-ok";
         }
 
         html += `
@@ -329,330 +539,4 @@ export function displaySearchResults(results, title, container) {
 
     html += "</tbody></table>";
     container.innerHTML = html;
-}
-
-// ======================================================
-//      DELEGAÇÃO DE EVENTOS DOS BOTÕES
-// ======================================================
-export function initDocumentation() {
-    if (_delegationInitialized) return;
-
-    const container = document.getElementById("documentation-list");
-    if (!container) return;
-
-
-    container.addEventListener("click", async (ev) => {
-        const btn = ev.target.closest("button");
-        if (!btn) return;
-
-        const id = btn.dataset.id;
-        if (!id) return;
-
-        // ===== PRESENÇA =====
-        if (btn.classList.contains("action-mark-presence")) {
-            const ok = await customConfirm(
-                "Deseja registrar PRESENÇA?",
-                "Confirmação de Presença",
-                "Registrar Presença",
-                "#28a745"
-            );
-
-            if (ok) {
-                const mod = await import("./agendamentos/eventos.js");
-                await handlePresenceWithStock(id);
-                await loadDocumentationList("", true); // forceRefresh
-                showNotification("Presença registrada!", "success");
-            }
-            return;
-        }
-
-        // ===== FALTA =====
-        if (btn.classList.contains("action-mark-absence")) {
-            const ok = await customConfirm(
-                "Deseja registrar FALTA?",
-                "Confirmação de Falta",
-                "Registrar Falta",
-                "#ffc107"
-            );
-
-            if (ok) {
-                const mod = await import("./agendamentos/eventos.js");
-                await mod.markAppointmentAsAbsent(id);
-                await loadDocumentationList("", true); // forceRefresh
-                showNotification("Falta registrada!", "warning");
-            }
-            return;
-        }
-
-        // ===== ENTREGUE =====
-        if (btn.classList.contains("action-mark-delivered")) {
-            const ok = await customConfirm(
-                "Confirmar que o documento foi entregue?",
-                "Confirmação",
-                "Marcar Entregue",
-                "#007bff"
-            );
-
-            if (ok) {
-                await db.collection("agendamentos").doc(id).update({
-                    doc_entregue: true
-                });
-                await loadDocumentationList("", true); // forceRefresh
-                showNotification("Documento marcado como entregue!", "success");
-            }
-            return;
-        }
-
-        // ===== EXCLUIR =====
-        if (btn.classList.contains("action-delete")) {
-            const ok = await customConfirm(
-                "Deseja excluir este agendamento?",
-                "Excluir Registro",
-                "Excluir",
-                "#dc3545"
-            );
-
-            if (ok) {
-                const mod = await import("./agendamentos/eventos.js");
-                await mod.deleteAppointment(id);
-                await loadDocumentationList("", true); // forceRefresh
-                showNotification("Agendamento excluído!", "success");
-            }
-            return;
-        }
-
-        // ===== EXCLUIR CONCLUÍDO =====
-        if (btn.classList.contains("action-delete-completed")) {
-            const ok = await customConfirm(
-                "Deseja apagar este registro concluído?",
-                "Apagar Registro",
-                "Apagar",
-                "#dc3545"
-            );
-
-            if (ok) {
-                await db.collection("agendamentos").doc(id).delete();
-                await loadDocumentationList("", true); // forceRefresh
-                showNotification("Registro apagado!", "success");
-            }
-            return;
-        }
-    });
-    // ===== BUSCA POR ESTAGIÁRIO =====
-    const searchInput = document.getElementById("documentation-search-input");
-    let searchTimeout;
-    if (searchInput) {
-        searchInput.addEventListener("input", () => {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => {
-                const termo = searchInput.value.trim();
-                currentPage = 1; // Reseta para a primeira página ao buscar
-                loadDocumentationList(termo, false);
-            }, 600); // Aguarda 600ms após parar de digitar
-        });
-    }
-
-    // ===== FILTRO POR MÊS =====
-    const monthFilter = document.getElementById("documentation-month-filter");
-    if (monthFilter) {
-        monthFilter.addEventListener("change", () => {
-            monthFilter.setAttribute("data-user-changed", "true");
-            const termo = searchInput ? searchInput.value.trim() : "";
-            currentPage = 1; // Reseta a paginação
-            loadDocumentationList(termo, false);
-        });
-    }
-
-    // ===== GERAR CSV =====
-    const csvButton = document.getElementById("generate-general-report");
-    if (csvButton) {
-        csvButton.addEventListener("click", generateDocumentationCSV);
-    }
-
-    // ===== ABAS =====
-    const tabBtns = document.querySelectorAll(".doc-tab-btn");
-    tabBtns.forEach(btn => {
-        btn.addEventListener("click", () => {
-            tabBtns.forEach(b => {
-                b.classList.remove("active");
-                b.style.color = "#64748b";
-                b.style.borderBottom = "none";
-                b.style.fontWeight = "500";
-            });
-            btn.classList.add("active");
-            btn.style.color = "#4F76C9";
-            btn.style.borderBottom = "3px solid #4F76C9";
-            btn.style.fontWeight = "600";
-            
-            const searchInput = document.getElementById("documentation-search-input");
-            currentPage = 1; // Reseta a paginação
-            loadDocumentationList(searchInput ? searchInput.value.trim() : "", false);
-        });
-    });
-
-    _delegationInitialized = true;
-}
-// ======================================================
-//      GERAR CSV COMPLETO
-// ======================================================
-export async function generateDocumentationCSV() {
-    try {
-        const snapshot = await db
-            .collection("agendamentos")
-            .orderBy("data_hora", "desc")
-            .get();
-
-        if (snapshot.empty) {
-            showNotification("Nenhum registro encontrado para gerar CSV.", "warning");
-            return;
-        }
-
-        let csv = "Estagiário;Sala;Data;Teste;Status\n";
-
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const dt = data.data_hora?.toDate();
-            const dataFormatada = dt ? dt.toLocaleDateString("pt-BR") : "N/A";
-
-            let status = "Pendente";
-
-            if (!data.presenca_aluno) {
-                status = "Não Atendido";
-            } else if (data.doc_entregue) {
-                status = "Entregue";
-            } else {
-                status = "Doc. Pendente";
-            }
-
-            csv += `${data.estagiario_nome || ""};${data.sala || ""};${dataFormatada};${data.teste_usado || ""};${status}\n`;
-        });
-
-        // Criar arquivo
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-
-        // criar link
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `relatorio-geral-${Date.now()}.csv`;
-        link.style.display = "none";
-
-        document.body.appendChild(link);
-        link.click();
-
-        // limpar
-        URL.revokeObjectURL(url);
-        link.remove();
-
-        showNotification("Relatório CSV gerado com sucesso!", "success");
-
-    } catch (err) {
-        console.error(err);
-        showNotification("Erro ao gerar CSV.", "error");
-    }
-}
-
-async function handlePresenceWithStock(appointmentId) {
-    const agRef = db.collection("agendamentos").doc(appointmentId);
-    const agSnap = await agRef.get();
-    const ag = agSnap.data();
-
-    if (!ag || ag.presenca_aluno) return;
-
-    // Sem teste
-    if (!ag.teste_usado_id) {
-        await agRef.update({ presenca_aluno: true });
-        return;
-    }
-
-    const testeRef = db.collection("estoque_testes").doc(ag.teste_usado_id);
-    const testeSnap = await testeRef.get();
-    const teste = testeSnap.data();
-
-    if (!teste) {
-        await agRef.update({ presenca_aluno: true });
-        return;
-    }
-
-    if (teste.tipo === "simples") {
-        await descontarTesteSimples(testeRef, agRef);
-    } else {
-        abrirModalDescontoComponentes(testeRef, teste, agRef);
-    }
-}
-
-async function descontarTesteSimples(testeRef, agRef) {
-    await testeRef.update({
-        quantidade_atual: firebase.firestore.FieldValue.increment(-1)
-    });
-
-    await agRef.update({
-        presenca_aluno: true,
-        estoque_baixado: true
-    });
-
-    showNotification("Presença registrada e estoque atualizado.", "success");
-}
-
-function abrirModalDescontoComponentes(testeRef, teste, agRef) {
-    const modal = document.getElementById("use-components-modal");
-    const list = document.getElementById("use-components-list");
-
-    list.innerHTML = "";
-
-    teste.componentes.forEach((c, idx) => {
-        list.innerHTML += `
-            <div class="component-use-row">
-                <label>
-                    ${c.nome} (estoque: ${c.quantidade_atual})
-                </label>
-                <input 
-                    type="number"
-                    min="0"
-                    max="${c.quantidade_atual}"
-                    value="0"
-                    data-index="${idx}">
-            </div>
-        `;
-    });
-
-    modal.classList.remove("hidden");
-
-    document.getElementById("cancel-use-components").onclick = () => {
-        modal.classList.add("hidden");
-    };
-
-    document.getElementById("confirm-use-components").onclick =
-        () => confirmarDescontoComponentes(testeRef, teste, agRef);
-}
-
-async function confirmarDescontoComponentes(testeRef, teste, agRef) {
-    const inputs = document.querySelectorAll("#use-components-list input");
-
-    const novosComponentes = teste.componentes.map(c => ({ ...c }));
-
-    for (const input of inputs) {
-        const idx = parseInt(input.dataset.index);
-        const usado = parseInt(input.value) || 0;
-
-        if (usado > novosComponentes[idx].quantidade_atual) {
-            showNotification("Quantidade usada maior que o estoque disponível.", "error");
-            return;
-        }
-
-        novosComponentes[idx].quantidade_atual -= usado;
-    }
-
-    await testeRef.update({
-        componentes: novosComponentes
-    });
-
-    await agRef.update({
-        presenca_aluno: true,
-        estoque_baixado: true
-    });
-
-    document.getElementById("use-components-modal").classList.add("hidden");
-
-    showNotification("Presença registrada e estoque atualizado.", "success");
 }

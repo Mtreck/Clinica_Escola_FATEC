@@ -106,35 +106,36 @@
             </div>
         </section>
 
-        <!-- =================== DOCUMENTAÇÃO =================== -->
+        <!-- =================== DOCUMENTAÇÃO (CONTROLE POR DUPLA) =================== -->
         <section id="documentacao" class="module hidden">
-            <h2>📝 Controle de Documentação (Relatórios e Prazos)</h2>
+            <h2>📝 Controle de Documentação por Dupla</h2>
 
-            <div class="header-actions">
-                <button id="generate-general-report" class="action-button btn-primary big-btn">
-                    Gerar Relatório Geral (CSV)
-                </button>
-
-                <div class="search-input-group fixed-width" style="margin-right: 15px;">
-                    <label for="documentation-month-filter">Filtrar por Mês:</label>
-                    <select id="documentation-month-filter" style="width: 100%; border: 1px solid #cbd5e1; border-radius: 4px; padding: 0.5rem; font-family: inherit; margin-top: 5px;">
-                        <option value="all">Todos os Meses</option>
-                    </select>
-                </div>
-
+            <div class="header-actions duplas-toolbar">
                 <div class="search-input-group fixed-width">
-                    <label for="documentation-search-input">Buscar por Estagiário:</label>
-                    <input type="text" id="documentation-search-input" placeholder="Digite o nome do estagiário" style="margin-top: 5px;">
+                    <label for="duplas-search-input">Buscar dupla:</label>
+                    <input type="text" id="duplas-search-input" placeholder="Nome da dupla ou estagiário">
                 </div>
+
+                <label class="duplas-toggle-arquivadas" for="duplas-show-archived">
+                    <input type="checkbox" id="duplas-show-archived">
+                    Mostrar arquivadas
+                </label>
+
+                <button id="generate-duplas-report" class="action-button btn-primary">Gerar Relatório (CSV)</button>
             </div>
 
-            <div class="tabs-container" style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">
-                <button class="doc-tab-btn active" data-filter="pendente_presenca" style="background: none; border: none; font-size: 16px; font-weight: 600; color: #4F76C9; cursor: pointer; padding: 5px 10px; border-bottom: 3px solid #4F76C9; outline: none;">Sem Presença</button>
-                <button class="doc-tab-btn" data-filter="doc_pendente" style="background: none; border: none; font-size: 16px; font-weight: 500; color: #64748b; cursor: pointer; padding: 5px 10px; outline: none;">Doc. Pendente</button>
-                <button class="doc-tab-btn" data-filter="concluido" style="background: none; border: none; font-size: 16px; font-weight: 500; color: #64748b; cursor: pointer; padding: 5px 10px; outline: none;">Concluídos</button>
+            <div id="duplas-summary" class="duplas-summary"></div>
+
+            <div class="nova-dupla-row">
+                <button type="button" id="nova-dupla-toggle-btn" class="nova-dupla-toggle">+ Nova Dupla</button>
+                <form id="nova-dupla-form" class="nova-dupla-form hidden">
+                    <input type="text" id="nova-dupla-nome" placeholder="Nome da dupla ou estagiário(s)" required>
+                    <button type="submit" class="primary-action-button">Adicionar</button>
+                    <button type="button" id="nova-dupla-cancel-btn" class="btn-secondary">Cancelar</button>
+                </form>
             </div>
 
-            <div id="documentation-list"></div>
+            <div id="duplas-list" class="duplas-list"></div>
         </section>
 
         <!-- =================== INVENTÁRIO =================== -->
@@ -198,8 +199,17 @@
             <div class="modal-content">
                 <h3 id="modal-date-display">Agendar Novo Atendimento</h3>
 
+                <div id="modal-status-row" class="modal-status-row hidden">
+                    <span id="modal-status-badge" class="status-default">Aguardando atendimento</span>
+                    <div class="modal-status-actions">
+                        <button type="button" id="modal-mark-presence-button" class="action-mark-presence">Marcar Presença</button>
+                        <button type="button" id="modal-mark-absence-button" class="action-mark-absence">Marcar Falta</button>
+                    </div>
+                </div>
+
                 <form id="appointment-form">
                     <input type="hidden" id="modal-appointment-doc-id">
+                    <input type="hidden" id="modal-appointment-serie-id">
 
                     <label for="modal-estagiario">Nome do Estagiário:</label>
                     <input type="text" id="modal-estagiario" required>
@@ -342,8 +352,26 @@
                 </div>
             </div>
         </div>
+    </div>
 
-        <script type="module" src="./js/app.js"></script>
+    <!-- =================== MODAL: EXCLUIR SÉRIE DE ATENDIMENTOS FIXOS =================== -->
+    <div id="delete-series-modal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-content modal-large">
+            <h3 id="delete-series-title">Atendimentos Fixos</h3>
+            <p style="color:#64748b;font-size:0.9rem;margin-top:-1rem;margin-bottom:1.5rem;">
+                Apenas os atendimentos futuros desta série são exibidos. Os que já ocorreram permanecem intactos.
+            </p>
+
+            <div id="delete-series-list"></div>
+
+            <div class="modal-actions">
+                <button type="button" id="delete-series-close-btn">Fechar</button>
+                <button type="button" id="delete-series-all-btn" class="btn-danger">Apagar Todos os Futuros</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./js/app.js"></script>
 
 </body>
 

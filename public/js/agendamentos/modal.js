@@ -1,6 +1,6 @@
 // js/agendamentos/modal.js
-import { saveNewAppointment, deleteAppointment } from "./eventos.js";
-import { loadTestOptions } from "./eventos.js"; 
+import { saveNewAppointment, deleteAppointment, markAppointmentAsPresent, markAppointmentAsAbsent } from "./eventos.js";
+import { loadTestOptions } from "./eventos.js";
 // Fecha QUALQUER modal preso logo no começo
 export function forceCloseConfirmModal() {
     const m = document.getElementById("custom-confirm-modal");
@@ -20,6 +20,7 @@ export function setupAppointmentModal() {
             document.getElementById('appointment-modal').classList.add('hidden');
             document.getElementById('modal-error-message').textContent = '';
             document.getElementById('modal-appointment-doc-id').value = '';
+            document.getElementById('modal-appointment-serie-id').value = '';
 
             forceCloseConfirmModal(); // <<< evita modal preso
         };
@@ -41,14 +42,37 @@ export function setupAppointmentModal() {
             }
         };
     }
+
+    const presenceBtn = document.getElementById('modal-mark-presence-button');
+    if (presenceBtn) {
+        presenceBtn.onclick = () => {
+            const docId = document.getElementById('modal-appointment-doc-id').value;
+            if (docId) {
+                document.getElementById('appointment-modal').classList.add('hidden');
+                markAppointmentAsPresent(docId);
+            }
+        };
+    }
+
+    const absenceBtn = document.getElementById('modal-mark-absence-button');
+    if (absenceBtn) {
+        absenceBtn.onclick = () => {
+            const docId = document.getElementById('modal-appointment-doc-id').value;
+            if (docId) {
+                document.getElementById('appointment-modal').classList.add('hidden');
+                markAppointmentAsAbsent(docId);
+            }
+        };
+    }
 }
 
 // Abrir o modal principal
 export function openManualAppointment() {
     forceCloseConfirmModal();
     loadRoomOptions();
-    loadTestOptions(); 
+    loadTestOptions();
     document.getElementById('modal-appointment-doc-id').value = '';
+    document.getElementById('modal-appointment-serie-id').value = '';
     document.getElementById('modal-estagiario').value = '';
     document.getElementById('modal-iniciais').value = '';
     document.getElementById('modal-date').value = '';
@@ -61,6 +85,9 @@ export function openManualAppointment() {
     document.querySelector('#appointment-modal h3').textContent = 'Agendar Novo Atendimento';
     document.getElementById('modal-save-button').textContent = 'Salvar Agendamento';
     document.getElementById('modal-delete-button').classList.add('hidden');
+
+    // Presença/Falta só fazem sentido para um agendamento que já existe
+    document.getElementById('modal-status-row').classList.add('hidden');
 
     document.getElementById('appointment-modal').classList.remove('hidden');
 }

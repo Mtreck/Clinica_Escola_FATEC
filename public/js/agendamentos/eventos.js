@@ -4,7 +4,27 @@ import { showNotification } from "../utils/notificacao.js";
 import { customConfirm } from "../utils/confirm.js";
 import { refetchCalendar } from "./calendario.js";
 import { formatDateTime } from "../utils/helpers.js";
-import { invalidateDocumentationCache } from "../documentacao.js";
+
+// Atualiza todas as visões que dependem de agendamentos (usado após criar/editar/excluir)
+function refreshAllViews() {
+    loadTodayAppointments();
+    refetchCalendar();
+}
+
+// Espelho público (sem dados sensíveis) usado pela Área do Aluno, que não exige login.
+// Só sala/data/hora vão para cá — nome do estagiário e iniciais do paciente nunca saem de "agendamentos".
+function syncAgendaPublica(id, dataParaSalvar) {
+    return db.collection('agenda_publica').doc(id).set({
+        sala: dataParaSalvar.sala,
+        data: dataParaSalvar.data,
+        hora: dataParaSalvar.hora,
+        data_hora: dataParaSalvar.data_hora
+    });
+}
+
+function deleteAgendaPublica(id) {
+    return db.collection('agenda_publica').doc(id).delete();
+}
 
 export async function loadTestOptions() {
     const select = document.getElementById('modal-teste');
@@ -150,6 +170,14 @@ export async function saveNewAppointment() {
         sala: sala
     };
 
+    // Identificador da série, usado para agrupar todas as ocorrências de um agendamento Fixo
+    const serieIdExistente = document.getElementById('modal-appointment-serie-id').value;
+    if (isEditing && serieIdExistente) {
+        dataParaSalvar.serie_id = serieIdExistente;
+    } else if (!isEditing && appointmentType === "Fixo") {
+        dataParaSalvar.serie_id = db.collection("agendamentos").doc().id;
+    }
+
     try {
 
         // =======================
@@ -157,27 +185,29 @@ export async function saveNewAppointment() {
         // =======================
         if (isEditing) {
             await db.collection("agendamentos").doc(docId).update(dataParaSalvar);
+            await syncAgendaPublica(docId, dataParaSalvar);
 
             showNotification("Agendamento atualizado com sucesso!", "success");
             document.getElementById('appointment-modal').classList.add("hidden");
             document.getElementById('modal-appointment-doc-id').value = '';
+            document.getElementById('modal-appointment-serie-id').value = '';
 
-            loadTodayAppointments();
-            refetchCalendar();
-            invalidateDocumentationCache();
+            refreshAllViews();
             return;
         }
 
         // =======================
         // CRIAR AGENDAMENTO
          //=======================
-        const ref = await db.collection("agendamentos").add({
+        const ref = db.collection("agendamentos").doc(); // gera o ID antes de salvar p/ espelhar na coleção pública
+        await ref.set({
             ...dataParaSalvar,
             presenca_aluno: false,
             doc_entregue: false,
             falta_registrada: false,
             estoque_baixado: false
         });
+        await syncAgendaPublica(ref.id, dataParaSalvar);
 
         // CRIAR SEMANAL POR 3 MESES
         if (appointmentType === "Fixo") {
@@ -190,16 +220,21 @@ export async function saveNewAppointment() {
 
             while (next <= end) {
                 const nextDateStr = next.toISOString().slice(0,10);
-
-                await db.collection("agendamentos").add({
+                const nextDataParaSalvar = {
                     ...dataParaSalvar,
                     data: nextDateStr,
-                    data_hora: firebase.firestore.Timestamp.fromDate(new Date(`${nextDateStr}T${hora}`)),
+                    data_hora: firebase.firestore.Timestamp.fromDate(new Date(`${nextDateStr}T${hora}`))
+                };
+
+                const nextRef = db.collection("agendamentos").doc();
+                await nextRef.set({
+                    ...nextDataParaSalvar,
                     presenca_aluno: false,
                     doc_entregue: false,
                     falta_registrada: false,
                     estoque_baixado: false
                 });
+                await syncAgendaPublica(nextRef.id, nextDataParaSalvar);
 
                 next.setDate(next.getDate() + 7);
             }
@@ -208,10 +243,9 @@ export async function saveNewAppointment() {
         showNotification("Agendamento salvo com sucesso!", "success");
         document.getElementById('appointment-modal').classList.add("hidden");
         document.getElementById('modal-appointment-doc-id').value = '';
+        document.getElementById('modal-appointment-serie-id').value = '';
 
-        loadTodayAppointments();
-        refetchCalendar();
-        invalidateDocumentationCache();
+        refreshAllViews();
 
     } catch (e) {
         console.error("saveNewAppointment", e);
@@ -232,6 +266,7 @@ export async function editAppointment(docId) {
 
         document.getElementById('modal-iniciais').value = data.iniciais_paciente || '';
         document.getElementById('modal-appointment-doc-id').value = docId;
+        document.getElementById('modal-appointment-serie-id').value = data.serie_id || '';
         document.getElementById('modal-estagiario').value = data.estagiario_nome || '';
         document.getElementById('modal-teste').value = (data.teste_usado === 'NÃO USOU') ? '' : (data.teste_usado || '');
         document.getElementById('modal-sala').value = data.sala || '';
@@ -242,6 +277,22 @@ export async function editAppointment(docId) {
         let tipo = data.tipo_agendamento || 'Único';
         if (tipo === 'Recorrente') tipo = 'Único';
         document.getElementById('modal-appointment-type').value = tipo;
+
+        const statusRow = document.getElementById('modal-status-row');
+        const statusBadge = document.getElementById('modal-status-badge');
+        if (statusRow && statusBadge) {
+            statusRow.classList.remove('hidden');
+            if (data.falta_registrada) {
+                statusBadge.textContent = 'Falta registrada';
+                statusBadge.className = 'status-falta';
+            } else if (data.presenca_aluno) {
+                statusBadge.textContent = 'Presença confirmada';
+                statusBadge.className = 'status-ok';
+            } else {
+                statusBadge.textContent = 'Aguardando atendimento';
+                statusBadge.className = 'status-default';
+            }
+        }
 
         document.querySelector('#appointment-modal h3').textContent = 'Editar Agendamento';
         document.getElementById('modal-save-button').textContent = 'Salvar Edição';
@@ -256,51 +307,293 @@ export async function editAppointment(docId) {
 
 export async function markAppointmentAsAbsent(docId) {
     const confirmed = await customConfirm('Deseja registrar FALTA para este agendamento?', 'Confirmação de Falta', 'Registrar Falta', '#ffc107');
-    if (!confirmed) return;
+    if (!confirmed) return false;
     try {
         await db.collection('agendamentos').doc(docId).update({ falta_registrada: true, presenca_aluno: false });
         showNotification('Falta registrada com sucesso.', 'warning');
-        loadTodayAppointments();
-        refetchCalendar();
-        invalidateDocumentationCache();
+        refreshAllViews();
+        return true;
     } catch (e) {
         console.error('markAppointmentAsAbsent', e);
         showNotification('Erro ao registrar falta.', 'error');
+        return false;
     }
 }
 
 export async function deleteAppointment(docId) {
     const docSnap = await db.collection('agendamentos').doc(docId).get();
     const data = docSnap.data() || {};
+
+    // Agendamentos Fixos têm várias ocorrências semanais: em vez de apagar só a clicada,
+    // abre o modal de gerenciamento da série para escolher quais futuras remover.
+    if (data.tipo_agendamento === 'Fixo') {
+        await openDeleteSeriesModal(data);
+        return;
+    }
+
     const estagiario = data.estagiario_nome || 'Estagiário';
     const dataHora = data.data_hora ? data.data_hora.toDate().toLocaleString('pt-BR') : 'Data desconhecida';
     const confirmed = await customConfirm(`Deseja realmente APAGAR o agendamento de ${estagiario} (${dataHora})?`, 'Confirmação de Exclusão', 'APAGAR', '#dc3545');
     if (!confirmed) return;
     try {
         await db.collection('agendamentos').doc(docId).delete();
+        await deleteAgendaPublica(docId);
         showNotification('Agendamento excluído.', 'success');
-        loadTodayAppointments();
-        refetchCalendar();
-        invalidateDocumentationCache();
+        refreshAllViews();
     } catch (e) {
         console.error('deleteAppointment', e);
         showNotification('Erro ao apagar o agendamento.', 'error');
     }
 }
 
-export async function markAppointmentAsPresent(docId) {
-    try {
-        await db.collection("agendamentos").doc(docId).update({
-            presenca_aluno: true,
-            falta_registrada: false
-        });
+// ======================================================
+//   EXCLUSÃO EM LOTE DE AGENDAMENTOS FIXOS (SÉRIE)
+// ======================================================
 
-        showNotification("Presença registrada.", "success");
-        loadTodayAppointments();
-        refetchCalendar();
-        invalidateDocumentationCache();
-    } catch (e) {
-        console.error("markAppointmentAsPresent", e);
-        showNotification("Erro ao registrar presença.", "error");
+// Busca as ocorrências futuras (data_hora >= agora) da mesma série de um agendamento Fixo.
+// Usa serie_id quando disponível; para registros antigos sem esse campo, agrupa por
+// estagiário + sala + horário como aproximação razoável.
+async function getFutureSeriesDocs(data) {
+    const now = new Date();
+    let snap;
+
+    if (data.serie_id) {
+        snap = await db.collection('agendamentos').where('serie_id', '==', data.serie_id).get();
+    } else {
+        snap = await db.collection('agendamentos')
+            .where('tipo_agendamento', '==', 'Fixo')
+            .where('estagiario_nome', '==', data.estagiario_nome)
+            .where('sala', '==', data.sala)
+            .where('hora', '==', data.hora)
+            .get();
     }
+
+    return snap.docs
+        .filter(d => {
+            const dt = d.data().data_hora?.toDate();
+            return dt && dt >= now;
+        })
+        .sort((a, b) => a.data().data_hora.toMillis() - b.data().data_hora.toMillis());
+}
+
+async function openDeleteSeriesModal(data) {
+    const modal = document.getElementById('delete-series-modal');
+    const list = document.getElementById('delete-series-list');
+    const title = document.getElementById('delete-series-title');
+    const deleteAllBtn = document.getElementById('delete-series-all-btn');
+    const closeBtn = document.getElementById('delete-series-close-btn');
+    if (!modal || !list) return;
+
+    title.textContent = `Atendimentos Fixos: ${data.estagiario_nome || ''} — ${data.sala || ''} às ${data.hora || ''}`;
+    list.innerHTML = '<p style="text-align:center;color:#64748b;padding:1rem 0;">Carregando...</p>';
+    modal.classList.remove('hidden');
+
+    try {
+        const docs = await getFutureSeriesDocs(data);
+        renderSeriesModalList(docs, list);
+    } catch (e) {
+        console.error('openDeleteSeriesModal', e);
+        list.innerHTML = '<p style="text-align:center;color:#dc3545;padding:1rem 0;">Erro ao carregar os atendimentos da série.</p>';
+    }
+
+    // Clona os botões para remover listeners de aberturas anteriores do modal
+    const newDeleteAllBtn = deleteAllBtn.cloneNode(true);
+    deleteAllBtn.parentNode.replaceChild(newDeleteAllBtn, deleteAllBtn);
+    newDeleteAllBtn.addEventListener('click', () => deleteAllSeriesItems(list));
+
+    const newCloseBtn = closeBtn.cloneNode(true);
+    closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+    newCloseBtn.addEventListener('click', () => modal.classList.add('hidden'));
+}
+
+function renderSeriesModalList(docs, list) {
+    if (docs.length === 0) {
+        list.innerHTML = '<p style="text-align:center;color:#64748b;padding:1rem 0;">Nenhum atendimento futuro restante nesta série.</p>';
+        return;
+    }
+
+    list.innerHTML = docs.map(doc => {
+        const d = doc.data();
+        const dt = d.data_hora.toDate();
+        const dataFmt = dt.toLocaleDateString('pt-BR');
+        return `
+            <div class="series-item-row" data-id="${doc.id}" style="display:flex;align-items:center;justify-content:space-between;padding:0.6rem 0.9rem;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:0.5rem;">
+                <span><strong>${dataFmt}</strong> às ${d.hora} — ${d.sala}</span>
+                <button type="button" class="series-item-remove" data-id="${doc.id}" title="Remover este atendimento" style="background:#ef4444;color:white;border:none;border-radius:4px;width:28px;height:28px;cursor:pointer;font-weight:bold;">✖</button>
+            </div>
+        `;
+    }).join('');
+
+    list.querySelectorAll('.series-item-remove').forEach(btn => {
+        btn.addEventListener('click', () => deleteSingleSeriesItem(btn.dataset.id, list));
+    });
+}
+
+async function deleteSingleSeriesItem(docId, list) {
+    try {
+        await db.collection('agendamentos').doc(docId).delete();
+        await deleteAgendaPublica(docId);
+
+        const row = list.querySelector(`.series-item-row[data-id="${docId}"]`);
+        if (row) row.remove();
+        if (!list.querySelector('.series-item-row')) {
+            list.innerHTML = '<p style="text-align:center;color:#64748b;padding:1rem 0;">Nenhum atendimento futuro restante nesta série.</p>';
+        }
+
+        showNotification('Atendimento removido.', 'success');
+        refreshAllViews();
+    } catch (e) {
+        console.error('deleteSingleSeriesItem', e);
+        showNotification('Erro ao remover atendimento.', 'error');
+    }
+}
+
+async function deleteAllSeriesItems(list) {
+    const rows = list.querySelectorAll('.series-item-row');
+    if (rows.length === 0) return;
+
+    const confirmed = await customConfirm(
+        `Deseja realmente apagar TODOS os ${rows.length} atendimentos futuros desta série?`,
+        'Apagar Série Completa', 'Apagar Todos', '#dc3545'
+    );
+    if (!confirmed) return;
+
+    try {
+        const batch = db.batch();
+        rows.forEach(row => {
+            batch.delete(db.collection('agendamentos').doc(row.dataset.id));
+            batch.delete(db.collection('agenda_publica').doc(row.dataset.id));
+        });
+        await batch.commit();
+
+        list.innerHTML = '<p style="text-align:center;color:#64748b;padding:1rem 0;">Nenhum atendimento futuro restante nesta série.</p>';
+        showNotification('Atendimentos futuros da série apagados com sucesso.', 'success');
+        refreshAllViews();
+    } catch (e) {
+        console.error('deleteAllSeriesItems', e);
+        showNotification('Erro ao apagar os atendimentos da série.', 'error');
+    }
+}
+
+export async function markAppointmentAsPresent(docId) {
+    const confirmed = await customConfirm('Deseja registrar PRESENÇA para este agendamento?', 'Confirmação de Presença', 'Registrar Presença', '#28a745');
+    if (!confirmed) return false;
+
+    try {
+        const agRef = db.collection('agendamentos').doc(docId);
+        const agSnap = await agRef.get();
+        const ag = agSnap.data();
+
+        if (!ag || ag.presenca_aluno) return true;
+
+        // Sem teste vinculado: só marca presença, sem baixa de estoque
+        if (!ag.teste_usado_id) {
+            await agRef.update({ presenca_aluno: true, falta_registrada: false });
+            showNotification('Presença registrada.', 'success');
+            refreshAllViews();
+            return true;
+        }
+
+        const testeRef = db.collection('estoque_testes').doc(ag.teste_usado_id);
+        const testeSnap = await testeRef.get();
+        const teste = testeSnap.data();
+
+        if (!teste) {
+            await agRef.update({ presenca_aluno: true, falta_registrada: false });
+            showNotification('Presença registrada.', 'success');
+            refreshAllViews();
+            return true;
+        }
+
+        if (teste.tipo === 'simples') {
+            await descontarTesteSimples(testeRef, agRef);
+        } else {
+            abrirModalDescontoComponentes(testeRef, teste, agRef);
+        }
+        return true;
+    } catch (e) {
+        console.error('markAppointmentAsPresent', e);
+        showNotification('Erro ao registrar presença.', 'error');
+        return false;
+    }
+}
+
+async function descontarTesteSimples(testeRef, agRef) {
+    await testeRef.update({
+        quantidade_atual: firebase.firestore.FieldValue.increment(-1)
+    });
+
+    await agRef.update({
+        presenca_aluno: true,
+        falta_registrada: false,
+        estoque_baixado: true
+    });
+
+    showNotification('Presença registrada e estoque atualizado.', 'success');
+    refreshAllViews();
+}
+
+function abrirModalDescontoComponentes(testeRef, teste, agRef) {
+    const modal = document.getElementById('use-components-modal');
+    const list = document.getElementById('use-components-list');
+
+    list.innerHTML = '';
+
+    teste.componentes.forEach((c, idx) => {
+        list.innerHTML += `
+            <div class="component-use-row">
+                <label>
+                    ${c.nome} (estoque: ${c.quantidade_atual})
+                </label>
+                <input
+                    type="number"
+                    min="0"
+                    max="${c.quantidade_atual}"
+                    value="0"
+                    data-index="${idx}">
+            </div>
+        `;
+    });
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('cancel-use-components').onclick = () => {
+        modal.classList.add('hidden');
+    };
+
+    document.getElementById('confirm-use-components').onclick =
+        () => confirmarDescontoComponentes(testeRef, teste, agRef);
+}
+
+async function confirmarDescontoComponentes(testeRef, teste, agRef) {
+    const inputs = document.querySelectorAll('#use-components-list input');
+
+    const novosComponentes = teste.componentes.map(c => ({ ...c }));
+
+    for (const input of inputs) {
+        const idx = parseInt(input.dataset.index);
+        const usado = parseInt(input.value) || 0;
+
+        if (usado > novosComponentes[idx].quantidade_atual) {
+            showNotification('Quantidade usada maior que o estoque disponível.', 'error');
+            return;
+        }
+
+        novosComponentes[idx].quantidade_atual -= usado;
+    }
+
+    await testeRef.update({
+        componentes: novosComponentes
+    });
+
+    await agRef.update({
+        presenca_aluno: true,
+        falta_registrada: false,
+        estoque_baixado: true
+    });
+
+    document.getElementById('use-components-modal').classList.add('hidden');
+
+    showNotification('Presença registrada e estoque atualizado.', 'success');
+    refreshAllViews();
 }
